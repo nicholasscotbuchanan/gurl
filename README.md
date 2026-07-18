@@ -9,7 +9,11 @@ SPDX-License-Identifier: curl
 gurl is the multi-threded curl. curl is a command-line tool for transferring data 
 from or to a server using URLs. It supports these protocols: DICT, FILE, FTP, 
 FTPS, GOPHER, GOPHERS, HTTP, HTTPS, IMAP, IMAPS, LDAP, LDAPS, MQTT, MQTTS, POP3, 
-POP3S, RTSP, SCP, SFTP, SMB, SMBS, NFSv3, SMTP, SMTPS, TELNET, TFTP, WS and WSS.
+POP3S, RTSP, SCP, SFTP, SMBv1, SMBS, SMTP, SMTPS, TELNET, TFTP, WS and WSS.
+
+But Gurl ALSO supports
+- NFSv3, and SSL 3.11 is on the way! 
+- Multithreaded downloads
 
 Learn how to use curl by reading [the
 man page](https://curl.se/docs/manpage.html) or [everything
