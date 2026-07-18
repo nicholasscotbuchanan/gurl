@@ -772,6 +772,10 @@
 #define USE_SSH
 #endif
 
+#ifdef USE_LIBNFS
+#define USE_NFS
+#endif
+
 /* GCC <4.6 does not support '#pragma GCC diagnostic push' and does not support
    'pragma GCC diagnostic' inside functions.
    Use CURL_HAVE_DIAG to guard the above in the curl codebase, instead of

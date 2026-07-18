@@ -1314,6 +1314,16 @@ if(NOT USE_LIBSSH2 AND CURL_USE_LIBSSH)
   set(USE_LIBSSH ON)
 endif()
 
+# libnfs (NFSv3)
+option(CURL_USE_LIBNFS "Use libnfs for NFS support" OFF)
+mark_as_advanced(CURL_USE_LIBNFS)
+set(USE_LIBNFS OFF)
+if(CURL_USE_LIBNFS)
+  find_package(Libnfs MODULE REQUIRED)
+  list(PREPEND CURL_LIBS CURL::libnfs)
+  set(USE_LIBNFS ON)
+endif()
+
 option(CURL_USE_GSASL "Use libgsasl" OFF)
 mark_as_advanced(CURL_USE_GSASL)
 if(CURL_USE_GSASL)
@@ -2008,6 +2018,7 @@ curl_add_if("IPNS"          NOT CURL_DISABLE_IPFS)
 curl_add_if("RTSP"          NOT CURL_DISABLE_RTSP)
 curl_add_if("MQTT"          NOT CURL_DISABLE_MQTT)
 curl_add_if("MQTTS"         NOT CURL_DISABLE_MQTT AND _ssl_enabled)
+curl_add_if("NFS"           USE_LIBNFS)
 curl_add_if("WS"            NOT CURL_DISABLE_WEBSOCKETS)
 curl_add_if("WSS"           NOT CURL_DISABLE_WEBSOCKETS AND _ssl_enabled)
 if(_items)
@@ -2421,6 +2432,7 @@ if(NOT CURL_DISABLE_INSTALL)
       "${PROJECT_SOURCE_DIR}/CMake/FindLibgsasl.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibidn2.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibpsl.cmake"
+      "${PROJECT_SOURCE_DIR}/CMake/FindLibnfs.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibssh.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibssh2.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibuv.cmake"

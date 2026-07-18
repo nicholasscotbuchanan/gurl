@@ -2350,9 +2350,13 @@ static CURLcode url_find_or_create_conn(struct Curl_easy *data)
 
   /***********************************************************************
    * file: is a special case in that it does not need a network connection
+   * AND it completes synchronously here (connect opens the file, the read
+   * happens later in file_do). Other PROTOPT_NONETWORK schemes (e.g. nfs) are
+   * async and multi-phase, so they must NOT take this fake-transfer shortcut --
+   * they flow through the normal PROTOCONNECT/CONNECTING/DO/DOING machinery.
    ***********************************************************************/
 #ifndef CURL_DISABLE_FILE
-  if(needle->scheme->flags & PROTOPT_NONETWORK) {
+  if(needle->scheme == &Curl_scheme_file) {
     bool done;
     /* this is supposed to be the connect function so we better at least check
        that the file is present here! */

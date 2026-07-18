@@ -27,8 +27,9 @@
 #include "curl_trc.h"
 #include "curlx/strparse.h"
 
-/* Only include this function if one or more of FTP, FILE are enabled. */
-#if !defined(CURL_DISABLE_FTP) || !defined(CURL_DISABLE_FILE)
+/* Only include this function if one or more of FTP, FILE, NFS are enabled. */
+#if !defined(CURL_DISABLE_FTP) || !defined(CURL_DISABLE_FILE) || \
+  defined(USE_NFS)
 
 /* Check if this is a range download, and if so, set the internal variables
    properly. */

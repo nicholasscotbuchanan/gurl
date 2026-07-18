@@ -42,6 +42,7 @@
 #include "tftp.h"
 #include "ws.h"
 #include "vssh/ssh.h"
+#include "vnfs/nfs.h"
 
 
 /* All URI schemes known to libcurl, but not necessarily implemented
@@ -237,6 +238,22 @@ const struct Curl_scheme Curl_scheme_mqtts = {
   CURLPROTO_MQTT,                     /* family */
   PROTOPT_SSL,                        /* flags */
   PORT_MQTTS,                         /* defport */
+};
+
+const struct Curl_scheme Curl_scheme_nfs = {
+  "nfs",                                /* scheme */
+#ifndef USE_NFS
+  ZERO_NULL,
+#else
+  &Curl_protocol_nfs,
+#endif
+  CURLPROTO_NFS,                        /* protocol */
+  CURLPROTO_NFS,                        /* family */
+  /* libnfs owns its own RPC transport (portmapper/mount/nfs) over sockets it
+     manages, and learns the ports from the URL's nfsport/mountport query args,
+     so curl must NOT open a socket of its own to PORT_NFS. */
+  PROTOPT_NONETWORK | PROTOPT_NOURLQUERY, /* flags */
+  PORT_NFS,                             /* defport */
 };
 
 const struct Curl_scheme Curl_scheme_pop3 = {
@@ -481,7 +498,8 @@ const struct Curl_scheme *Curl_getn_scheme(const char *scheme, size_t len)
     &Curl_scheme_smtps,
     &Curl_scheme_socks,
     &Curl_scheme_socks4,
-    &Curl_scheme_socks5, NULL, NULL,
+    &Curl_scheme_socks5,
+    &Curl_scheme_nfs, NULL,
     &Curl_scheme_gophers,
     &Curl_scheme_ws,
     &Curl_scheme_sftp,

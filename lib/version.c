@@ -332,6 +332,9 @@ static const char * const supported_protocols[] = {
 #if defined(USE_SSL) && !defined(CURL_DISABLE_MQTT)
   "mqtts",
 #endif
+#ifdef USE_NFS
+  "nfs",
+#endif
 #ifndef CURL_DISABLE_POP3
   "pop3",
 #endif
