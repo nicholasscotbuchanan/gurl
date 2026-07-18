@@ -140,7 +140,12 @@ build_libsmb2() {
   git remote add origin https://github.com/sahlberg/libsmb2.git
   git fetch -q --depth 1 origin "${LIBSMB2_REF}"
   git checkout -q FETCH_HEAD
-  ./bootstrap
+  # libsmb2's configure unconditionally hard-fails if libdl is absent, which
+  # breaks the mingw (Windows) cross build where there is no libdl. Make the
+  # check optional; curl's SMB path does not use libsmb2's dlopen feature.
+  sed -i 's/AC_MSG_ERROR(\[dlsym not found, libdl is required\])//' configure.ac
+  # invoke via sh: bootstrap may not have its exec bit after a raw fetch/checkout
+  sh ./bootstrap
   # --without-libkrb5: use libsmb2's built-in NTLMSSP; curl's SMB path does
   #   not need Kerberos and krb5 dev files are not in the cross sysroots.
   # --disable-werror: libsmb2's win32 compat shim trips -Werror under mingw.
