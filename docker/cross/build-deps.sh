@@ -165,10 +165,14 @@ build_libsmb2() {
   #                          field named "interface" (#define interface struct)
   #   HAVE_LINGER          - mingw's winsock already defines struct linger
   #   NEED_GETLOGIN_R/GETPID/RANDOM/SRANDOM - provide the POSIX shims mingw lacks
+  # -D_WINDOWS: libsmb2's compat.c gates its Windows helper macros (login_num,
+  #   getpid_num, smb2_srandom) on _WINDOWS, which MSVC defines implicitly but
+  #   mingw does not. Without it the NEED_* shims below reference undefined
+  #   helpers. Define it so mingw takes libsmb2's Windows code paths.
   smb2_defs=""
   if [ "$PLATFORM" = "windows" ]; then
-    smb2_defs="-DWIN32_LEAN_AND_MEAN -D_CRT_SECURE_NO_WARNINGS -DHAVE_LINGER \
--DNEED_GETLOGIN_R -DNEED_GETPID -DNEED_RANDOM -DNEED_SRANDOM"
+    smb2_defs="-D_WINDOWS -DWIN32_LEAN_AND_MEAN -D_CRT_SECURE_NO_WARNINGS \
+-DHAVE_LINGER -DNEED_GETLOGIN_R -DNEED_RANDOM -DNEED_SRANDOM"
   fi
   # --without-libkrb5: use libsmb2's built-in NTLMSSP; curl's SMB path does
   #   not need Kerberos and krb5 dev files are not in the cross sysroots.
