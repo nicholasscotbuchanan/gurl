@@ -151,6 +151,11 @@ build_libsmb2() {
   # int/SOCKET ABI mismatch. Teach the header to recognise mingw too.
   sed -i 's/#if defined(_WINDOWS)$/#if defined(_WINDOWS) || defined(__MINGW32__)/' include/smb2/libsmb2.h
   sed -i 's/#if defined(_WINDOWS) || defined(_XBOX)/#if defined(_WINDOWS) || defined(__MINGW32__) || defined(_XBOX)/' include/smb2/libsmb2.h
+  # libsmb2 ships a fallback asprintf/vasprintf guarded only by `#ifndef
+  # vasprintf`. mingw-w64 provides both as functions (not macros), so the guard
+  # does not trip and the fallback redefines them. Skip the fallback on mingw.
+  sed -i 's/^#ifndef vasprintf$/#if !defined(vasprintf) \&\& !defined(__MINGW32__)/' include/asprintf.h
+  sed -i 's/^#ifndef asprintf$/#if !defined(asprintf) \&\& !defined(__MINGW32__)/' include/asprintf.h
   # invoke via sh: bootstrap may not have its exec bit after a raw fetch/checkout
   sh ./bootstrap
   # --without-libkrb5: use libsmb2's built-in NTLMSSP; curl's SMB path does
