@@ -190,6 +190,7 @@ static const struct LongShort aliases[] = {
   {"knownhosts",                 ARG_FILE, ' ', C_KNOWNHOSTS},
   {"krb",                        ARG_STRG|ARG_DEPR, ' ', C_KRB},
   {"krb4",                       ARG_STRG|ARG_DEPR, ' ', C_KRB4},
+  {"legacy-io",                  ARG_BOOL, ' ', C_LEGACY_IO},
   {"libcurl",                    ARG_STRG, ' ', C_LIBCURL},
   {"limit-rate",                 ARG_STRG, ' ', C_LIMIT_RATE},
   {"list-only",                  ARG_BOOL, 'l', C_LIST_ONLY},
@@ -2208,6 +2209,9 @@ static ParameterError opt_bool(struct OperationConfig *config,
     break;
   case C_PARALLEL: /* --parallel */
     global->parallel = toggle;
+    break;
+  case C_LEGACY_IO: /* --legacy-io */
+    global->legacy_io = toggle;
     break;
   case C_PARALLEL_IMMEDIATE:   /* --parallel-immediate */
     global->parallel_connect = toggle;

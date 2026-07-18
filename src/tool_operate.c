@@ -80,6 +80,7 @@
 #include "tool_hugehelp.h"
 #include "tool_progress.h"
 #include "tool_ipfs.h"
+#include "tool_chunked.h"
 #include "config2setopts.h"
 #include "var.h"
 
@@ -738,6 +739,15 @@ static CURLcode post_per_transfer(struct per_transfer *per,
 
   if(!per->curl || !config)
     return result;
+
+  if(per->chunked) {
+    /* This transfer was handled by the self-contained chunked downloader,
+       which already wrote (and manages retries for) the output file. Skip the
+       normal per-file output handling and tool-level retry. */
+    if(!per->skip)
+      result = post_check_result(per, result);
+    return result;
+  }
 
 #ifdef _WIN32
   if(per->uploadfile) {
@@ -1530,6 +1540,28 @@ static CURLcode single_transfer(struct OperationConfig *config,
 
 static long all_added; /* number of easy handles currently added */
 
+/* TRUE if 'per' is a plain file download that may be split into concurrent
+   byte-range chunks. Cheap checks only, no network. */
+static bool chunk_eligible(struct per_transfer *per)
+{
+  struct OperationConfig *config = per->config;
+  if(global->legacy_io)          /* --legacy-io: force single-connection I/O */
+    return FALSE;
+  if(per->uploadfile)            /* uploads are not chunked */
+    return FALSE;
+  if(!per->outfile || !strcmp(per->outfile, "-"))
+    return FALSE;                /* need a real, seekable output file */
+  if(per->outs.out_null)
+    return FALSE;
+  if(config->show_headers || config->no_body)
+    return FALSE;                /* --include/--head would corrupt offsets */
+  if(config->resume_from || config->resume_from_current || config->use_resume)
+    return FALSE;                /* resume and chunking do not mix */
+  if(config->range)              /* user already limited the byte range */
+    return FALSE;
+  return TRUE;
+}
+
 /*
  * add_parallel_transfers() sets 'morep' to TRUE if there are more transfers
  * to add even after this call returns. sets 'addedp' to TRUE if one or more
@@ -2116,7 +2148,21 @@ static CURLcode serial_transfers(CURLSH *share)
         result = curl_easy_perform_ev(per->curl);
       else
 #endif
-        result = curl_easy_perform(per->curl);
+      {
+        /* Automatic chunked download: for an eligible download, learn the size
+           up front with one cheap metadata request (HEAD/SIZE/GETATTR). If it
+           is larger than 1 GiB over a range-capable protocol, fetch it as
+           concurrent 1 GiB byte-range chunks; otherwise perform an ordinary
+           single transfer. A file of 1 GiB or less costs one extra metadata
+           round-trip and is then downloaded normally. */
+        curl_off_t chunk_total = 0;
+        if(chunk_eligible(per) && tool_chunk_probe(per, &chunk_total)) {
+          per->chunked = TRUE;
+          result = tool_chunk_download(per, share, chunk_total);
+        }
+        else
+          result = curl_easy_perform(per->curl);
+      }
     }
 
     returncode = post_per_transfer(per, result, &retry, &delay_ms);

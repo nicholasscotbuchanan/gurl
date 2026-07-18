@@ -142,6 +142,7 @@ typedef enum {
   C_KNOWNHOSTS,
   C_KRB,
   C_KRB4,
+  C_LEGACY_IO,
   C_LIBCURL,
   C_LIMIT_RATE,
   C_LIST_ONLY,

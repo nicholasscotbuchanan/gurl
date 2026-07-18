@@ -342,6 +342,8 @@ struct GlobalConfig {
 #endif
   BIT(parallel);
   BIT(parallel_connect);
+  BIT(legacy_io);    /* --legacy-io: force a single-connection download,
+                        disabling the automatic parallel chunked download */
   BIT(fail_early);                /* exit on first transfer error */
   BIT(styled_output);             /* enable fancy output style detection */
   BIT(trace_fopened);
