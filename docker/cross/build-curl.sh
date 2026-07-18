@@ -63,6 +63,16 @@ if [ "$ZLIB_MODE" = "skip" ]; then
 fi
 
 mkdir -p _build && cd _build
+# On Windows the libsmb2 header check pulls in <windows.h>, whose
+# `#define interface struct` clobbers libsmb2's dcerpc struct field named
+# "interface". curl's own sources define WIN32_LEAN_AND_MEAN before including
+# windows.h, but the bare configure test program does not, so set it here for
+# the whole curl configure. It is a no-op on non-Windows targets.
+curl_cppflags=""
+if [ "${PLATFORM:-}" = "windows" ]; then
+  curl_cppflags="-DWIN32_LEAN_AND_MEAN"
+fi
+
 echo "=== configure (host=$TRIPLE) ==="
 ../configure \
   --host="$TRIPLE" \
@@ -74,6 +84,7 @@ echo "=== configure (host=$TRIPLE) ==="
   --without-libpsl \
   --without-brotli --without-zstd \
   --disable-ldap --disable-ldaps \
+  CPPFLAGS="$curl_cppflags ${CPPFLAGS:-}" \
   LIBS="$EXTRA_LIBS"
 
 echo "=== configure summary ==="

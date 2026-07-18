@@ -2771,6 +2771,7 @@ if test "x$OPT_LIBSMB2" != "xno"; then
     , , [
 #include <sys/types.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <time.h>
 #include <smb2/smb2.h>
     ]
