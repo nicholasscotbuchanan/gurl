@@ -124,21 +124,23 @@ never leak into the cross build.
 
 ## Verification status
 
-All five targets were built end-to-end in podman on an arm64 macOS host, each a
-static, NFS-enabled curl (`nfs` in the protocol list, libnfs linked):
+All six targets were built end-to-end in podman on an arm64 macOS host, each a
+static curl with **both** `nfs` and `smb` in the protocol list (libnfs and
+libsmb2 linked):
 
-| Target        | Result                                             | NFS check                     |
-| ------------- | -------------------------------------------------- | ----------------------------- |
-| linux-x86_64  | `static-pie` ELF x86-64, OpenSSL 3.5.1, zlib 1.3.1 | ran in-container: `nfs: ENABLED` |
-| linux-aarch64 | `static-pie` ELF ARM64                             | ran in-container: `nfs: ENABLED` |
-| windows       | `PE32+` static `.exe`                              | configure summary + `nfs` symbols |
-| freebsd       | static ELF, FreeBSD 14.3                           | configure summary + `libnfs` symbols |
-| macos-x86_64  | `Mach-O` x86_64 (PIE)                              | configure summary + `nfs://`/`libnfs` symbols |
-| macos-arm64   | `Mach-O` arm64 (PIE)                               | configure summary + `nfs://`/`libnfs` symbols |
+| Target        | Result                                             | NFS / SMB check                    |
+| ------------- | -------------------------------------------------- | ---------------------------------- |
+| linux-x86_64  | `static-pie` ELF x86-64, OpenSSL 3.5.1, zlib 1.3.1 | ran (alpine): `--version` lists `nfs` + `smb`; **live SMB 3.1.1 transfer** to a Samba container |
+| linux-aarch64 | `static-pie` ELF ARM64                             | ran (alpine, arm64): `--version` lists `nfs` + `smb` |
+| windows       | `PE32+` static `.exe`                              | `SMB (libsmb2): enabled` + smb3 handler strings in the binary |
+| freebsd       | static ELF, FreeBSD 14.x                           | `SMB (libsmb2): enabled` + smb3 handler strings in the binary |
+| macos-x86_64  | `Mach-O` x86_64 (PIE)                              | `SMB (libsmb2): enabled` + smb3 handler strings in the binary |
+| macos-arm64   | `Mach-O` arm64 (PIE)                               | `SMB (libsmb2): enabled` + smb3 handler strings in the binary |
 
-Non-Linux binaries can't run on the Linux build host, so their NFS support is
-confirmed from curl's configure summary (`Protocols: … nfs …`) plus libnfs
-symbols in the binary rather than by executing `--version`.
+Non-Linux binaries can't run on the Linux build host, so their NFS/SMB support
+is confirmed from curl's configure summary (`Protocols: … nfs … smb …`, and the
+`NFS (libnfs)` / `SMB (libsmb2)` lines) plus the handler strings embedded in the
+binary, rather than by executing `--version`.
 
 ## External dependencies that can drift
 
