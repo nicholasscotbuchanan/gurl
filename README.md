@@ -4,7 +4,7 @@ Copyright (C) Daniel Stenberg, <daniel@haxx.se>, et al.
 SPDX-License-Identifier: curl
 -->
 
-# [![curl logo](https://curl.se/logo/curl-logo.svg)](https://curl.se/)
+# [![curl logo](https://github.com/nicholasscotbuchanan/gurl/blob/master/gurl.png)](https://github.com/nicholasscotbuchanan/gurl/edit/master/README.md)
 
 curl is a command-line tool for transferring data from or to a server using
 URLs. It supports these protocols: DICT, FILE, FTP, FTPS, GOPHER, GOPHERS,
