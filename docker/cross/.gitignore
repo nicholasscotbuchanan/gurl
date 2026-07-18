@@ -1,0 +1,3 @@
+# Never commit the Apple SDK (build outputs under dist/ are ignored at the repo root)
+macos/sdk/*.tar.*
+macos/sdk/*.sdk
