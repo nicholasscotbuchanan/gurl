@@ -6,10 +6,10 @@ SPDX-License-Identifier: curl
 
 # [![curl logo](https://github.com/nicholasscotbuchanan/gurl/blob/master/gurl.png)](https://github.com/nicholasscotbuchanan/gurl/edit/master/README.md)
 
-curl is a command-line tool for transferring data from or to a server using
-URLs. It supports these protocols: DICT, FILE, FTP, FTPS, GOPHER, GOPHERS,
-HTTP, HTTPS, IMAP, IMAPS, LDAP, LDAPS, MQTT, MQTTS, POP3, POP3S, RTSP, SCP,
-SFTP, SMB, SMBS, NFSv3, SMTP, SMTPS, TELNET, TFTP, WS and WSS.
+gurl is the multi-threded curl. curl is a command-line tool for transferring data 
+from or to a server using URLs. It supports these protocols: DICT, FILE, FTP, 
+FTPS, GOPHER, GOPHERS, HTTP, HTTPS, IMAP, IMAPS, LDAP, LDAPS, MQTT, MQTTS, POP3, 
+POP3S, RTSP, SCP, SFTP, SMB, SMBS, NFSv3, SMTP, SMTPS, TELNET, TFTP, WS and WSS.
 
 Learn how to use curl by reading [the
 man page](https://curl.se/docs/manpage.html) or [everything
