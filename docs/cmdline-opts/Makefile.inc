@@ -149,6 +149,7 @@ DPAGES = \
   key.md \
   knownhosts.md \
   krb.md \
+  legacy-io.md \
   libcurl.md \
   limit-rate.md \
   list-only.md \

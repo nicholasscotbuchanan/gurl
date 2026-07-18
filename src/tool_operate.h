@@ -76,6 +76,9 @@ struct per_transfer {
                  error (eg --fail-early) has occurred in another transfer and
                  this transfer gets aborted in the progress callback */
   BIT(skip);  /* considered already done */
+  BIT(chunked); /* handled by the self-contained chunked downloader */
+  BIT(chunk_watch); /* armed during the size probe so the header cb notes ranges */
+  BIT(chunk_accept_ranges); /* server sent Accept-Ranges: bytes (HTTP) */
 };
 
 CURLcode operate(int argc, argv_item_t argv[]);

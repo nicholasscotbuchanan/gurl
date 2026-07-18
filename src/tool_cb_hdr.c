@@ -464,6 +464,18 @@ size_t tool_header_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
     long response = 0;
     curl_easy_getinfo(per->curl, CURLINFO_RESPONSE_CODE, &response);
 
+    /* Automatic chunked download: note byte-range support on a 2xx response so
+       the write callback can decide whether to switch to a chunked fetch. */
+    if(per->chunk_watch && (response / 100 == 2) &&
+       checkprefix("Accept-Ranges:", str)) {
+      const char *p = str + 14; /* strlen("Accept-Ranges:") */
+      for(; (p + 5) <= end; p++)
+        if(curl_strnequal(p, "bytes", 5)) {
+          per->chunk_accept_ranges = TRUE;
+          break;
+        }
+    }
+
     if((response / 100 != 2) && (response / 100 != 3))
       /* only care about etag and content-disposition headers in 2xx and 3xx
          responses */

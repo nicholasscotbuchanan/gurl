@@ -26,6 +26,7 @@
 #include "tool_cfgable.h"
 #include "tool_msgs.h"
 #include "tool_cb_wrt.h"
+#include "tool_chunked.h"
 #include "tool_operate.h"
 
 #ifdef _WIN32

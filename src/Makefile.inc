@@ -87,6 +87,7 @@ CURL_CFILES = \
   tool_cb_soc.c \
   tool_cb_wrt.c \
   tool_cfgable.c \
+  tool_chunked.c \
   tool_dirhie.c \
   tool_doswin.c \
   tool_easysrc.c \
@@ -131,6 +132,7 @@ CURL_HFILES = \
   tool_cb_soc.h \
   tool_cb_wrt.h \
   tool_cfgable.h \
+  tool_chunked.h \
   tool_dirhie.h \
   tool_doswin.h \
   tool_easysrc.h \
