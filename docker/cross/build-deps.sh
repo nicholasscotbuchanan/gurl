@@ -156,9 +156,15 @@ build_libsmb2() {
   # --without-libkrb5: use libsmb2's built-in NTLMSSP; curl's SMB path does
   #   not need Kerberos and krb5 dev files are not in the cross sysroots.
   # --disable-werror: libsmb2's win32 compat shim trips -Werror under mingw.
+  # -DWIN32_LEAN_AND_MEAN: libsmb2's dcerpc struct has a field named
+  #   "interface", which the full <windows.h> clobbers with its
+  #   `#define interface struct`. Upstream's CMake build defines this to keep
+  #   windows.h lean; the autotools build does not, so add it here. It is a
+  #   no-op on non-Windows targets.
   ./configure --host="$TRIPLE" --prefix="$PREFIX" \
     --disable-shared --enable-static \
-    --without-libkrb5 --disable-werror
+    --without-libkrb5 --disable-werror \
+    CPPFLAGS="${CPPFLAGS:-} -DWIN32_LEAN_AND_MEAN"
   # Build only the library and headers: the utils/ subdir builds -Werror host
   # programs (smb2-cp, smb2-ls) that are not needed and can fail to cross-link.
   make -C include install
