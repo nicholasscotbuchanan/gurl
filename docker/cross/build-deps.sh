@@ -158,18 +158,25 @@ build_libsmb2() {
   sed -i 's/^#ifndef asprintf$/#if !defined(asprintf) \&\& !defined(__MINGW32__)/' include/asprintf.h
   # invoke via sh: bootstrap may not have its exec bit after a raw fetch/checkout
   sh ./bootstrap
+  # libsmb2's autotools build omits several Windows defines that its own CMake
+  # build sets, so the mingw compile hits problems the autotools path never
+  # covers. Reproduce the CMake Windows define set for the mingw target:
+  #   WIN32_LEAN_AND_MEAN  - keep <windows.h> from clobbering the dcerpc struct
+  #                          field named "interface" (#define interface struct)
+  #   HAVE_LINGER          - mingw's winsock already defines struct linger
+  #   NEED_GETLOGIN_R/GETPID/RANDOM/SRANDOM - provide the POSIX shims mingw lacks
+  smb2_defs=""
+  if [ "$PLATFORM" = "windows" ]; then
+    smb2_defs="-DWIN32_LEAN_AND_MEAN -D_CRT_SECURE_NO_WARNINGS -DHAVE_LINGER \
+-DNEED_GETLOGIN_R -DNEED_GETPID -DNEED_RANDOM -DNEED_SRANDOM"
+  fi
   # --without-libkrb5: use libsmb2's built-in NTLMSSP; curl's SMB path does
   #   not need Kerberos and krb5 dev files are not in the cross sysroots.
   # --disable-werror: libsmb2's win32 compat shim trips -Werror under mingw.
-  # -DWIN32_LEAN_AND_MEAN: libsmb2's dcerpc struct has a field named
-  #   "interface", which the full <windows.h> clobbers with its
-  #   `#define interface struct`. Upstream's CMake build defines this to keep
-  #   windows.h lean; the autotools build does not, so add it here. It is a
-  #   no-op on non-Windows targets.
   ./configure --host="$TRIPLE" --prefix="$PREFIX" \
     --disable-shared --enable-static \
     --without-libkrb5 --disable-werror \
-    CPPFLAGS="${CPPFLAGS:-} -DWIN32_LEAN_AND_MEAN"
+    CPPFLAGS="${CPPFLAGS:-} $smb2_defs"
   # Build only the library and headers: the utils/ subdir builds -Werror host
   # programs (smb2-cp, smb2-ls) that are not needed and can fail to cross-link.
   make -C include install
