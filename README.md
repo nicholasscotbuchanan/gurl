@@ -12,7 +12,7 @@ FTPS, GOPHER, GOPHERS, HTTP, HTTPS, IMAP, IMAPS, LDAP, LDAPS, MQTT, MQTTS, POP3,
 POP3S, RTSP, SCP, SFTP, SMBv1, SMBS, SMTP, SMTPS, TELNET, TFTP, WS and WSS.
 
 But Gurl ALSO supports
-- NFSv3, and SSL 3.11 is on the way! 
+- NFSv3, and SMB 3.11 is on the way! 
 - Multithreaded downloads
 
 Learn how to use curl by reading [the
