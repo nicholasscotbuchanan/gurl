@@ -44,13 +44,17 @@ applications using (lib)curl visit [the support page](https://curl.se/support.ht
 
 ## Website
 
-Visit the [curl website](https://curl.se/) for the latest news and downloads.
+We don't have one. Sorry. Visit the [curl website](https://curl.se/) for the latest curl news and downloads.
 
 ## Source code
 
-Download the latest source from the Git server:
+Download the latest gurl source from the Git server:
 
-    git clone https://github.com/curl/curl
+    git clone https://github.com/nicholasscotbuchanan/gurl.git
+
+Download the latest curl source from the Git server:
+
+    git clone https://github.com/curl/curl.git
 
 ## Security problems
 
