@@ -1324,14 +1324,14 @@ if(CURL_USE_LIBNFS)
   set(USE_LIBNFS ON)
 endif()
 
-# libsmbclient (Samba) - SMB2/3 up to SMB 3.1.1
-option(CURL_USE_LIBSMBCLIENT "Use Samba libsmbclient for SMB2/3 support" OFF)
-mark_as_advanced(CURL_USE_LIBSMBCLIENT)
-set(USE_LIBSMBCLIENT OFF)
-if(CURL_USE_LIBSMBCLIENT)
-  find_package(Libsmbclient MODULE REQUIRED)
-  list(PREPEND CURL_LIBS CURL::libsmbclient)
-  set(USE_LIBSMBCLIENT ON)
+# libsmb2 - SMB2/SMB3 up to SMB 3.1.1
+option(CURL_USE_LIBSMB2 "Use libsmb2 for SMB2/SMB3 support" OFF)
+mark_as_advanced(CURL_USE_LIBSMB2)
+set(USE_LIBSMB2 OFF)
+if(CURL_USE_LIBSMB2)
+  find_package(Libsmb2 MODULE REQUIRED)
+  list(PREPEND CURL_LIBS CURL::libsmb2)
+  set(USE_LIBSMB2 ON)
 endif()
 
 option(CURL_USE_GSASL "Use libgsasl" OFF)
@@ -2015,7 +2015,7 @@ curl_add_if("POP3"          NOT CURL_DISABLE_POP3)
 curl_add_if("POP3S"         NOT CURL_DISABLE_POP3 AND _ssl_enabled)
 curl_add_if("IMAP"          NOT CURL_DISABLE_IMAP)
 curl_add_if("IMAPS"         NOT CURL_DISABLE_IMAP AND _ssl_enabled)
-curl_add_if("SMB"           USE_LIBSMBCLIENT OR (CURL_ENABLE_SMB AND
+curl_add_if("SMB"           USE_LIBSMB2 OR (CURL_ENABLE_SMB AND
                             _use_curl_ntlm_core AND (SIZEOF_CURL_OFF_T GREATER 4)))
 curl_add_if("SMBS"          CURL_ENABLE_SMB AND _ssl_enabled AND
                             _use_curl_ntlm_core AND (SIZEOF_CURL_OFF_T GREATER 4))
@@ -2443,7 +2443,7 @@ if(NOT CURL_DISABLE_INSTALL)
       "${PROJECT_SOURCE_DIR}/CMake/FindLibidn2.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibpsl.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibnfs.cmake"
-      "${PROJECT_SOURCE_DIR}/CMake/FindLibsmbclient.cmake"
+      "${PROJECT_SOURCE_DIR}/CMake/FindLibsmb2.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibssh.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibssh2.cmake"
       "${PROJECT_SOURCE_DIR}/CMake/FindLibuv.cmake"

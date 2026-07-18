@@ -328,8 +328,8 @@ const struct Curl_scheme Curl_scheme_scp = {
 
 const struct Curl_scheme Curl_scheme_smb = {
   "smb",                                /* scheme */
-#if defined(USE_LIBSMBCLIENT)
-  &Curl_protocol_smb3,                  /* SMB2/3 up to 3.1.1 via libsmbclient */
+#if defined(USE_LIBSMB2)
+  &Curl_protocol_smb3,                  /* SMB2/3 up to 3.1.1 via libsmb2 */
 #elif defined(CURL_ENABLE_SMB) && defined(USE_CURL_NTLM_CORE)
   &Curl_protocol_smb,
 #else
@@ -337,8 +337,8 @@ const struct Curl_scheme Curl_scheme_smb = {
 #endif
   CURLPROTO_SMB,                        /* protocol */
   CURLPROTO_SMB,                        /* family */
-#if defined(USE_LIBSMBCLIENT)
-  PROTOPT_NONETWORK,                    /* libsmbclient owns its transport */
+#if defined(USE_LIBSMB2)
+  PROTOPT_NONETWORK,                    /* libsmb2 owns its transport */
 #else
   PROTOPT_NONE,                         /* flags */
 #endif

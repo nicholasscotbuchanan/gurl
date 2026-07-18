@@ -23,33 +23,31 @@
  ***************************************************************************/
 
 /*
- * SMB2/3 handler backed by Samba's libsmbclient. Unlike the native SMBv1
- * handler in lib/smb.c, this speaks the modern SMB2/3 dialects up to
- * SMB 3.1.1, including message signing and AES-GCM encryption, all of which
- * libsmbclient implements. libsmbclient owns its own network transport, so
- * the scheme is registered as PROTOPT_NONETWORK and the whole (blocking)
- * transfer is performed in do_it, mirroring the file:// handler.
+ * SMB2/SMB3 handler backed by libsmb2. Unlike the native SMBv1 handler in
+ * lib/smb.c this speaks the modern dialects up to SMB 3.1.1, including
+ * message signing and encryption, and unlike Samba's libsmbclient it is a
+ * small portable library that cross-compiles and static-links for Linux,
+ * macOS, Windows and FreeBSD.
+ *
+ * libsmb2 runs its own transport over a socket it owns, so the scheme is
+ * registered PROTOPT_NONETWORK and this handler drives libsmb2's async API
+ * from curl's multi loop, exposing libsmb2's fd through the pollset exactly
+ * as the NFS handler does for libnfs.
  */
 
 #include "curl_setup.h"
 
-#ifdef USE_LIBSMBCLIENT
+#ifdef USE_LIBSMB2
 
-#include <libsmbclient.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <string.h>
+#include <smb2/smb2.h>
+#include <smb2/libsmb2.h>
 
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
-/* Fallbacks in case the system headers are unavailable; libsmbclient uses
-   the same numeric values as POSIX on all supported platforms. */
+/* Fallbacks for the open() flags in case <fcntl.h> is unavailable. libsmb2
+   uses the same numeric values as POSIX on all supported platforms. */
 #ifndef O_RDONLY
 #define O_RDONLY 0
 #endif
@@ -62,49 +60,60 @@
 #ifndef O_TRUNC
 #define O_TRUNC  01000
 #endif
-#ifndef SEEK_SET
-#define SEEK_SET 0
-#endif
 
 #include "urldata.h"
 #include "vsmb/smb3.h"
 #include "transfer.h"
 #include "sendf.h"
 #include "progress.h"
+#include "connect.h"
+#include "select.h"
 #include "url.h"
 #include "creds.h"
-#include "connect.h"
 #include "curl_range.h"
 #include "curl_trc.h"
-#include "curlx/strerr.h"
 
-/* Upper bound for a single SMB read/write staging buffer. */
+/* Upper bound for a single SMB2 READ/WRITE. The server advertises a maximum
+   which we honor; this only caps our buffer allocation. */
 #define SMB3_MAX_BLOCK (1024 * 1024)
 
 #define CURL_META_SMB3_CONN "meta:proto:smb3:conn"
 #define CURL_META_SMB3_EASY "meta:proto:smb3:easy"
 
-/* Per-connection state: owns the libsmbclient context and parsed URL. */
+/* Per-connection state: owns the libsmb2 context and the parsed URL. */
 struct smb3_conn {
-  SMBCCTX *ctx;             /* libsmbclient context; owns its own socket(s) */
-  char *url;               /* smb://host/share/path passed to libsmbclient */
-  char *user;              /* username with any DOMAIN/ prefix removed */
-  char *domain;            /* workgroup/domain, or NULL */
-  char *passwd;            /* password, or NULL */
-  /* cached libsmbclient method pointers (valid after init) */
-  smbc_open_fn fn_open;
-  smbc_read_fn fn_read;
-  smbc_write_fn fn_write;
-  smbc_close_fn fn_close;
-  smbc_stat_fn fn_stat;
-  smbc_lseek_fn fn_lseek;
+  struct smb2_context *smb2; /* libsmb2 context; owns its own socket */
+  struct smb2_url *url;      /* parsed server / share / path */
+  bool connect_done;         /* tree connect callback has fired */
+  int connect_status;        /* 0 on success, -errno on failure */
 };
+
+/* State machine for a single SMB request. */
+typedef enum {
+  SMB3_INIT,      /* nothing issued yet */
+  SMB3_OPEN,      /* smb2_open_async in flight */
+  SMB3_STAT,      /* smb2_fstat_async in flight (download only) */
+  SMB3_TRANSFER,  /* pread/pwrite loop */
+  SMB3_STOP       /* transfer complete */
+} smb3_state;
 
 /* Per-easy request state. */
 struct smb3_request {
-  SMBCFILE *fh;            /* open file handle */
-  char *buf;               /* staging buffer */
+  struct smb2fh *fh;         /* open file handle */
+  char *buf;                 /* read/write staging buffer */
   size_t bufsize;
+  curl_off_t offset;         /* current file offset */
+  curl_off_t remaining;      /* bytes left to transfer, -1 = until EOF */
+  curl_off_t filesize;       /* size reported by fstat (download) */
+  struct smb2_stat_64 st;    /* fstat target, written by libsmb2 */
+  smb3_state state;
+  bool upload;
+  bool eos;                  /* client upload reader reached end of stream */
+  /* async op bookkeeping - written by the libsmb2 callbacks, read by the
+     doing() driver which owns the Curl_easy handle */
+  bool op_inflight;
+  bool op_done;
+  int op_status;             /* bytes moved (>=0) or -errno */
 };
 
 static void smb3_conn_dtor(void *key, size_t klen, void *entry)
@@ -113,12 +122,10 @@ static void smb3_conn_dtor(void *key, size_t klen, void *entry)
   (void)key;
   (void)klen;
   if(sc) {
-    if(sc->ctx)
-      smbc_free_context(sc->ctx, 1); /* 1 = shut down active connections */
-    curlx_free(sc->url);
-    curlx_free(sc->user);
-    curlx_free(sc->domain);
-    curlx_free(sc->passwd);
+    if(sc->url)
+      smb2_destroy_url(sc->url);
+    if(sc->smb2)
+      smb2_destroy_context(sc->smb2);
     curlx_free(sc);
   }
 }
@@ -134,49 +141,66 @@ static void smb3_easy_dtor(void *key, size_t klen, void *entry)
   }
 }
 
-/* libsmbclient calls this to obtain the credentials to authenticate with.
-   The connection state pointer is stashed as the context user data. */
-static void smb3_auth_cb(SMBCCTX *c,
-                         const char *srv, const char *shr,
-                         char *wg, int wglen,
-                         char *un, int unlen,
-                         char *pw, int pwlen)
+/* Give libsmb2 a chance to make progress. The multi loop wakes us when the
+   libsmb2 socket is ready (see smb3_pollset); we re-poll with a zero timeout
+   to obtain the exact event mask libsmb2 expects and hand it to
+   smb2_service(). */
+static CURLcode smb3_do_service(struct Curl_easy *data, struct smb3_conn *sc)
 {
-  struct smb3_conn *sc = smbc_getOptionUserData(c);
-  (void)srv;
-  (void)shr;
-  if(!sc)
-    return;
-  if(sc->domain && wglen > 0)
-    curl_msnprintf(wg, (size_t)wglen, "%s", sc->domain);
-  if(sc->user && unlen > 0)
-    curl_msnprintf(un, (size_t)unlen, "%s", sc->user);
-  if(sc->passwd && pwlen > 0)
-    curl_msnprintf(pw, (size_t)pwlen, "%s", sc->passwd);
-}
+  struct pollfd pfd;
+  t_socket fd = smb2_get_fd(sc->smb2);
 
-/* Split "DOMAIN/user" or "DOMAIN\user" into domain + user (both strdup'd). */
-static CURLcode smb3_parse_user(struct smb3_conn *sc, const char *userpwd)
-{
-  const char *slash = strchr(userpwd, '/');
-  if(!slash)
-    slash = strchr(userpwd, '\\');
+  if(fd == (t_socket)-1)
+    return CURLE_OK; /* no socket yet, nothing to service */
 
-  if(slash) {
-    sc->domain = curlx_malloc((size_t)(slash - userpwd) + 1);
-    if(!sc->domain)
-      return CURLE_OUT_OF_MEMORY;
-    memcpy(sc->domain, userpwd, (size_t)(slash - userpwd));
-    sc->domain[slash - userpwd] = 0;
-    sc->user = curlx_strdup(slash + 1);
+  pfd.fd = (curl_socket_t)fd;
+  pfd.events = (short)smb2_which_events(sc->smb2);
+  pfd.revents = 0;
+
+  if(Curl_poll(&pfd, 1, 0) < 0)
+    return CURLE_RECV_ERROR;
+
+  if(smb2_service(sc->smb2, pfd.revents) < 0) {
+    failf(data, "SMB: %s", smb2_get_error(sc->smb2));
+    return CURLE_RECV_ERROR;
   }
-  else
-    sc->user = curlx_strdup(userpwd);
-
-  if(!sc->user)
-    return CURLE_OUT_OF_MEMORY;
   return CURLE_OK;
 }
+
+/* ---- libsmb2 async callbacks: record results only ---- */
+
+static void smb3_connect_cb(struct smb2_context *smb2, int status,
+                            void *cbdata, void *private_data)
+{
+  struct smb3_conn *sc = private_data;
+  (void)smb2;
+  (void)cbdata;
+  sc->connect_done = TRUE;
+  sc->connect_status = status;
+}
+
+static void smb3_open_cb(struct smb2_context *smb2, int status,
+                         void *cbdata, void *private_data)
+{
+  struct smb3_request *req = private_data;
+  (void)smb2;
+  req->op_done = TRUE;
+  req->op_status = status;
+  if(!status)
+    req->fh = cbdata;
+}
+
+static void smb3_generic_cb(struct smb2_context *smb2, int status,
+                            void *cbdata, void *private_data)
+{
+  struct smb3_request *req = private_data;
+  (void)smb2;
+  (void)cbdata;
+  req->op_done = TRUE;
+  req->op_status = status; /* bytes moved, or -errno */
+}
+
+/* ---- handler callbacks ---- */
 
 static CURLcode smb3_setup_connection(struct Curl_easy *data,
                                       struct connectdata *conn)
@@ -184,215 +208,136 @@ static CURLcode smb3_setup_connection(struct Curl_easy *data,
   struct smb3_conn *sc;
   const char *user = Curl_creds_user(conn->creds);
   const char *passwd = Curl_creds_passwd(conn->creds);
-  CURLcode result;
+  const char *url = Curl_bufref_ptr(&data->state.url);
 
   sc = curlx_calloc(1, sizeof(*sc));
   if(!sc)
     return CURLE_OUT_OF_MEMORY;
 
+  sc->smb2 = smb2_init_context();
+  if(!sc->smb2) {
+    curlx_free(sc);
+    return CURLE_OUT_OF_MEMORY;
+  }
+
+  /* Split smb://server/share/path into server, share and file. libsmb2 also
+     picks up any domain;user:password embedded in the URL. */
+  sc->url = smb2_parse_url(sc->smb2, url);
+  if(!sc->url) {
+    failf(data, "SMB: could not parse URL: %s", smb2_get_error(sc->smb2));
+    smb2_destroy_context(sc->smb2);
+    curlx_free(sc);
+    return CURLE_URL_MALFORMAT;
+  }
+
   if(Curl_conn_meta_set(conn, CURL_META_SMB3_CONN, sc, smb3_conn_dtor))
     return CURLE_OUT_OF_MEMORY;
 
-  /* Build the smb://host/share/path URL for libsmbclient. state.up.path
-     already begins with '/' and holds "/share/dir/file". */
-  sc->url = curl_maprintf("smb://%s%s", conn->origin->hostname,
-                          data->state.up.path);
-  if(!sc->url)
-    return CURLE_OUT_OF_MEMORY;
-
+  /* Credentials from the URL or -u. A domain may be given either as part of
+     the username (DOMAIN/user, DOMAIN\user) or in the URL. */
   if(user && user[0]) {
-    result = smb3_parse_user(sc, user);
-    if(result)
-      return result;
+    const char *sep = strchr(user, '/');
+    if(!sep)
+      sep = strchr(user, '\\');
+    if(sep) {
+      char *domain = curlx_malloc((size_t)(sep - user) + 1);
+      if(!domain)
+        return CURLE_OUT_OF_MEMORY;
+      memcpy(domain, user, (size_t)(sep - user));
+      domain[sep - user] = 0;
+      smb2_set_domain(sc->smb2, domain);
+      curlx_free(domain);
+      smb2_set_user(sc->smb2, sep + 1);
+    }
+    else
+      smb2_set_user(sc->smb2, user);
   }
-  if(passwd && passwd[0]) {
-    sc->passwd = curlx_strdup(passwd);
-    if(!sc->passwd)
-      return CURLE_OUT_OF_MEMORY;
-  }
+  else if(sc->url->user)
+    smb2_set_user(sc->smb2, sc->url->user);
 
-  sc->ctx = smbc_new_context();
-  if(!sc->ctx) {
-    failf(data, "SMB: could not create libsmbclient context");
-    return CURLE_FAILED_INIT;
-  }
+  if(passwd && passwd[0])
+    smb2_set_password(sc->smb2, passwd);
 
-  smbc_setOptionUserData(sc->ctx, sc);
-  smbc_setFunctionAuthDataWithContext(sc->ctx, smb3_auth_cb);
-  /* Honor the port from the URL. libsmbclient's URL parser does not accept a
-     port, so it has to be set on the context instead. */
-  smbc_setPort(sc->ctx, conn->origin->port);
-  /* Restrict to SMB2 .. SMB 3.1.1: never fall back to insecure SMBv1. */
-  smbc_setOptionProtocols(sc->ctx, "SMB2", "SMB3_11");
-  /* Use SMB3 encryption (AES-GCM/CCM) when the server offers it. */
-  smbc_setOptionSmbEncryptionLevel(sc->ctx, SMBC_ENCRYPTLEVEL_REQUEST);
-  smbc_setDebug(sc->ctx, 0);
+  if(sc->url->domain && sc->url->domain[0])
+    smb2_set_domain(sc->smb2, sc->url->domain);
 
-  if(!smbc_init_context(sc->ctx)) {
-    failf(data, "SMB: could not initialize libsmbclient context");
-    return CURLE_FAILED_INIT;
-  }
+  smb2_set_security_mode(sc->smb2, SMB2_NEGOTIATE_SIGNING_ENABLED);
 
-  /* Cache the method pointers now that the context is initialized. */
-  sc->fn_open = smbc_getFunctionOpen(sc->ctx);
-  sc->fn_read = smbc_getFunctionRead(sc->ctx);
-  sc->fn_write = smbc_getFunctionWrite(sc->ctx);
-  sc->fn_close = smbc_getFunctionClose(sc->ctx);
-  sc->fn_stat = smbc_getFunctionStat(sc->ctx);
-  sc->fn_lseek = smbc_getFunctionLseek(sc->ctx);
-
-  /* libsmbclient owns its transport, so this connection is never reused. */
+  /* libsmb2 owns its own transport, so this connection is never pooled. */
   connclose(conn, "SMB connections are not reused");
   return CURLE_OK;
 }
 
 static CURLcode smb3_connect(struct Curl_easy *data, bool *done)
 {
-  /* libsmbclient connects lazily on the first open(); nothing to do here. */
-  (void)data;
-  *done = TRUE;
+  struct connectdata *conn = data->conn;
+  struct smb3_conn *sc = Curl_conn_meta_get(conn, CURL_META_SMB3_CONN);
+
+  *done = FALSE;
+  if(!sc)
+    return CURLE_FAILED_INIT;
+
+  if(!sc->url->share || !sc->url->share[0]) {
+    failf(data, "SMB: missing share in URL");
+    return CURLE_URL_MALFORMAT;
+  }
+
+  /* Pass NULL for the user: libsmb2 then uses the username already set on the
+     context with smb2_set_user() (smb2_get_user() is not exported by all
+     libsmb2 builds, so it must not be relied on here). */
+  if(smb2_connect_share_async(sc->smb2, sc->url->server, sc->url->share,
+                              NULL, smb3_connect_cb, sc) < 0) {
+    failf(data, "SMB: failed to connect to \\\\%s\\%s: %s",
+          sc->url->server, sc->url->share, smb2_get_error(sc->smb2));
+    return CURLE_COULDNT_CONNECT;
+  }
   return CURLE_OK;
 }
 
-static CURLcode smb3_upload(struct Curl_easy *data, struct smb3_conn *sc,
-                            struct smb3_request *req)
+static CURLcode smb3_connecting(struct Curl_easy *data, bool *done)
 {
-  CURLcode result = CURLE_OK;
-  char errbuf[STRERROR_LEN];
-
-  req->fh = sc->fn_open(sc->ctx, sc->url, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if(!req->fh) {
-    failf(data, "SMB: could not open %s for writing: %s",
-          sc->url, curlx_strerror(errno, errbuf, sizeof(errbuf)));
-    return CURLE_UPLOAD_FAILED;
-  }
-
-  if(data->state.infilesize >= 0)
-    Curl_pgrsSetUploadSize(data, data->state.infilesize);
-
-  for(;;) {
-    size_t nread = 0;
-    bool eos = FALSE;
-    const char *p;
-    size_t left;
-
-    result = Curl_client_read(data, req->buf, req->bufsize, &nread, &eos);
-    if(result)
-      break;
-
-    p = req->buf;
-    left = nread;
-    while(left) {
-      ssize_t w = sc->fn_write(sc->ctx, req->fh, p, left);
-      if(w < 0) {
-        failf(data, "SMB: write failed: %s",
-              curlx_strerror(errno, errbuf, sizeof(errbuf)));
-        return CURLE_SEND_ERROR;
-      }
-      p += w;
-      left -= (size_t)w;
-      Curl_pgrs_upload_inc(data, (size_t)w);
-    }
-
-    result = Curl_pgrsUpdate(data);
-    if(result)
-      break;
-
-    if(eos)
-      break;
-  }
-  return result;
-}
-
-static CURLcode smb3_download(struct Curl_easy *data, struct smb3_conn *sc,
-                              struct smb3_request *req)
-{
+  struct connectdata *conn = data->conn;
+  struct smb3_conn *sc = Curl_conn_meta_get(conn, CURL_META_SMB3_CONN);
   CURLcode result;
-  struct stat st;
-  curl_off_t filesize = -1;
-  curl_off_t offset;
-  curl_off_t remaining;
-  char errbuf[STRERROR_LEN];
 
-  /* Learn the size up front (satisfies HEAD/size probes and bounds the
-     transfer) without downloading any data. */
-  if(sc->fn_stat(sc->ctx, sc->url, &st) == 0)
-    filesize = (curl_off_t)st.st_size;
+  *done = FALSE;
+  if(!sc)
+    return CURLE_FAILED_INIT;
 
-  req->fh = sc->fn_open(sc->ctx, sc->url, O_RDONLY, 0);
-  if(!req->fh) {
-    failf(data, "SMB: could not open %s: %s", sc->url,
-          curlx_strerror(errno, errbuf, sizeof(errbuf)));
-    return CURLE_REMOTE_FILE_NOT_FOUND;
-  }
-
-  /* Honor --range / --continue-at so this handler composes with the tool's
-     parallel chunked download (each chunk is a byte range). */
-  result = Curl_range(data);
+  result = smb3_do_service(data, sc);
   if(result)
     return result;
 
-  if(data->state.resume_from < 0) {
-    /* last N bytes: needs a known size */
-    if(filesize < 0) {
-      failf(data, "SMB: cannot get the size of %s", sc->url);
-      return CURLE_READ_ERROR;
+  if(sc->connect_done) {
+    if(sc->connect_status < 0) {
+      failf(data, "SMB: could not connect to \\\\%s\\%s: %s",
+            sc->url->server, sc->url->share, smb2_get_error(sc->smb2));
+      return CURLE_LOGIN_DENIED;
     }
-    data->state.resume_from += filesize;
-    if(data->state.resume_from < 0)
-      data->state.resume_from = 0;
+    infof(data, "SMB: connected to \\\\%s\\%s",
+          sc->url->server, sc->url->share);
+    *done = TRUE;
   }
-  offset = (data->state.resume_from > 0) ? data->state.resume_from : 0;
+  return CURLE_OK;
+}
 
-  if(offset) {
-    if(sc->fn_lseek(sc->ctx, req->fh, (off_t)offset, SEEK_SET) < 0) {
-      failf(data, "SMB: could not seek in %s: %s", sc->url,
-            curlx_strerror(errno, errbuf, sizeof(errbuf)));
-      return CURLE_BAD_DOWNLOAD_RESUME;
-    }
-  }
+static CURLcode smb3_pollset(struct Curl_easy *data, struct easy_pollset *ps)
+{
+  struct smb3_conn *sc = Curl_conn_meta_get(data->conn, CURL_META_SMB3_CONN);
+  t_socket fd;
+  int events;
 
-  remaining = data->req.maxdownload; /* -1 = until EOF */
-  if(remaining < 0 && filesize >= 0)
-    remaining = (filesize > offset) ? (filesize - offset) : 0;
-
-  if(remaining >= 0)
-    Curl_pgrsSetDownloadSize(data, remaining);
-
-  /* CURLOPT_NOBODY (e.g. the tool's chunk-size probe): stat already gave us
-     the size, so finish without transferring any body. */
-  if(data->req.no_body)
+  if(!sc || !sc->smb2)
     return CURLE_OK;
 
-  while(remaining) {
-    size_t want = req->bufsize;
-    ssize_t n;
+  fd = smb2_get_fd(sc->smb2);
+  if(fd == (t_socket)-1)
+    return CURLE_OK;
 
-    if(remaining > 0 && (curl_off_t)want > remaining)
-      want = (size_t)remaining;
-
-    n = sc->fn_read(sc->ctx, req->fh, req->buf, want);
-    if(n < 0) {
-      failf(data, "SMB: read failed: %s",
-            curlx_strerror(errno, errbuf, sizeof(errbuf)));
-      return CURLE_RECV_ERROR;
-    }
-    if(n == 0)
-      break; /* EOF */
-
-    result = Curl_client_write(data, CLIENTWRITE_BODY, req->buf, (size_t)n);
-    if(result)
-      return result;
-
-    if(remaining > 0)
-      remaining -= n;
-
-    result = Curl_pgrsUpdate(data);
-    if(result)
-      return result;
-  }
-
-  return Curl_client_write(data, CLIENTWRITE_BODY | CLIENTWRITE_EOS, "", 0);
+  events = smb2_which_events(sc->smb2);
+  return Curl_pollset_set(data, ps, (curl_socket_t)fd,
+                          (events & POLLIN) ? TRUE : FALSE,
+                          (events & POLLOUT) ? TRUE : FALSE);
 }
 
 static CURLcode smb3_do(struct Curl_easy *data, bool *done)
@@ -400,10 +345,9 @@ static CURLcode smb3_do(struct Curl_easy *data, bool *done)
   struct connectdata *conn = data->conn;
   struct smb3_conn *sc = Curl_conn_meta_get(conn, CURL_META_SMB3_CONN);
   struct smb3_request *req;
-  CURLcode result;
+  uint32_t maxio;
 
-  *done = TRUE; /* the whole transfer completes synchronously here */
-
+  *done = FALSE;
   if(!sc)
     return CURLE_FAILED_INIT;
 
@@ -411,24 +355,247 @@ static CURLcode smb3_do(struct Curl_easy *data, bool *done)
   if(!req)
     return CURLE_OUT_OF_MEMORY;
 
-  req->bufsize = SMB3_MAX_BLOCK;
+  req->upload = data->state.upload;
+  req->state = SMB3_INIT;
+  req->filesize = -1;
+
+  /* Honor --range / --continue-at for downloads so this handler composes with
+     the tool's parallel chunked download (each chunk is a byte range). */
+  if(!req->upload) {
+    CURLcode result = Curl_range(data);
+    if(result) {
+      curlx_free(req);
+      return result;
+    }
+    req->offset = (data->state.resume_from > 0) ? data->state.resume_from : 0;
+    req->remaining = data->req.maxdownload; /* -1 means until EOF */
+  }
+  else
+    req->remaining = data->state.infilesize; /* -1 means unknown */
+
+  maxio = req->upload ? smb2_get_max_write_size(sc->smb2) :
+                        smb2_get_max_read_size(sc->smb2);
+  if(!maxio || maxio > SMB3_MAX_BLOCK)
+    maxio = SMB3_MAX_BLOCK;
+  req->bufsize = maxio;
   req->buf = curlx_malloc(req->bufsize);
   if(!req->buf) {
     curlx_free(req);
     return CURLE_OUT_OF_MEMORY;
   }
+
   if(Curl_meta_set(data, CURL_META_SMB3_EASY, req, smb3_easy_dtor))
     return CURLE_OUT_OF_MEMORY;
 
-  /* No socket transfer follows; libsmbclient does the I/O below. */
+  return CURLE_OK;
+}
+
+/* Queue the next pread for a download, sized to what remains. */
+static CURLcode smb3_read_next(struct Curl_easy *data, struct smb3_conn *sc,
+                               struct smb3_request *req)
+{
+  size_t want = req->bufsize;
+
+  if(req->remaining >= 0 && (curl_off_t)want > req->remaining)
+    want = (size_t)req->remaining;
+
+  req->op_done = FALSE;
+  req->op_inflight = TRUE;
+  if(smb2_pread_async(sc->smb2, req->fh, (uint8_t *)req->buf,
+                      (uint32_t)want, (uint64_t)req->offset,
+                      smb3_generic_cb, req) < 0) {
+    failf(data, "SMB: read failed: %s", smb2_get_error(sc->smb2));
+    return CURLE_RECV_ERROR;
+  }
+  return CURLE_OK;
+}
+
+/* Pull the next block from the client and queue a pwrite for an upload. */
+static CURLcode smb3_write_next(struct Curl_easy *data, struct smb3_conn *sc,
+                                struct smb3_request *req, bool *stop)
+{
+  size_t nread = 0;
+  bool eos = FALSE;
+  CURLcode result;
+
+  *stop = FALSE;
+  result = Curl_client_read(data, req->buf, req->bufsize, &nread, &eos);
+  if(result)
+    return result;
+
+  req->eos = eos;
+  if(!nread) {
+    if(eos)
+      *stop = TRUE;
+    return CURLE_OK; /* nothing to write this round */
+  }
+
+  req->op_done = FALSE;
+  req->op_inflight = TRUE;
+  if(smb2_pwrite_async(sc->smb2, req->fh, (const uint8_t *)req->buf,
+                       (uint32_t)nread, (uint64_t)req->offset,
+                       smb3_generic_cb, req) < 0) {
+    failf(data, "SMB: write failed: %s", smb2_get_error(sc->smb2));
+    return CURLE_SEND_ERROR;
+  }
+  return CURLE_OK;
+}
+
+static CURLcode smb3_transfer_done(struct Curl_easy *data,
+                                   struct smb3_request *req, bool *done)
+{
+  CURLcode result = CURLE_OK;
+  if(!req->upload)
+    /* flush end-of-stream to the client writer */
+    result = Curl_client_write(data, CLIENTWRITE_BODY | CLIENTWRITE_EOS,
+                               "", 0);
+  req->state = SMB3_STOP;
+  *done = TRUE;
   Curl_xfer_setup_nop(data);
-
-  if(data->state.upload)
-    result = smb3_upload(data, sc, req);
-  else
-    result = smb3_download(data, sc, req);
-
   return result;
+}
+
+static CURLcode smb3_doing(struct Curl_easy *data, bool *done)
+{
+  struct connectdata *conn = data->conn;
+  struct smb3_conn *sc = Curl_conn_meta_get(conn, CURL_META_SMB3_CONN);
+  struct smb3_request *req = Curl_meta_get(data, CURL_META_SMB3_EASY);
+  CURLcode result;
+  int flags;
+  bool stop = FALSE;
+
+  *done = FALSE;
+  if(!sc || !req)
+    return CURLE_FAILED_INIT;
+
+  result = smb3_do_service(data, sc);
+  if(result)
+    return result;
+
+  /* Re-entrant state machine: a case either returns (waiting on an async op or
+     finished) or advances req->state and breaks to re-evaluate immediately. */
+  for(;;) {
+    switch(req->state) {
+    case SMB3_INIT:
+      flags = req->upload ? (O_WRONLY | O_CREAT | O_TRUNC) : O_RDONLY;
+      req->op_done = FALSE;
+      req->op_inflight = TRUE;
+      req->state = SMB3_OPEN;
+      if(smb2_open_async(sc->smb2, sc->url->path, flags,
+                         smb3_open_cb, req) < 0) {
+        failf(data, "SMB: open of %s failed: %s",
+              sc->url->path, smb2_get_error(sc->smb2));
+        return CURLE_REMOTE_FILE_NOT_FOUND;
+      }
+      return CURLE_OK;
+
+    case SMB3_OPEN:
+      if(!req->op_done)
+        return CURLE_OK;
+      if(req->op_status < 0) {
+        failf(data, "SMB: could not open %s: %s",
+              sc->url->path, smb2_get_error(sc->smb2));
+        return CURLE_REMOTE_FILE_NOT_FOUND;
+      }
+      req->op_inflight = FALSE;
+      if(req->upload) {
+        if(data->state.infilesize >= 0)
+          Curl_pgrsSetUploadSize(data, data->state.infilesize);
+        req->state = SMB3_TRANSFER;
+        break; /* issue the first write */
+      }
+      /* download: learn the size to bound the transfer and drive progress */
+      req->op_done = FALSE;
+      req->op_inflight = TRUE;
+      req->state = SMB3_STAT;
+      if(smb2_fstat_async(sc->smb2, req->fh, &req->st,
+                          smb3_generic_cb, req) < 0) {
+        failf(data, "SMB: fstat failed: %s", smb2_get_error(sc->smb2));
+        return CURLE_RECV_ERROR;
+      }
+      return CURLE_OK;
+
+    case SMB3_STAT: /* download only */
+      if(!req->op_done)
+        return CURLE_OK;
+      if(req->op_status < 0) {
+        failf(data, "SMB: fstat failed: %s", smb2_get_error(sc->smb2));
+        return CURLE_RECV_ERROR;
+      }
+      req->op_inflight = FALSE;
+      req->filesize = (curl_off_t)req->st.smb2_size;
+
+      /* a negative resume offset counts back from the end of the file */
+      if(data->state.resume_from < 0) {
+        data->state.resume_from += req->filesize;
+        if(data->state.resume_from < 0)
+          data->state.resume_from = 0;
+        req->offset = data->state.resume_from;
+      }
+
+      if(req->remaining < 0)
+        /* whole file from the current offset to EOF */
+        req->remaining = (req->filesize > req->offset) ?
+                         (req->filesize - req->offset) : 0;
+      Curl_pgrsSetDownloadSize(data, req->remaining);
+      if(!req->remaining || data->req.no_body)
+        /* CURLOPT_NOBODY (e.g. the tool's chunk-size probe): the fstat gave us
+           the size, so finish without transferring any data */
+        return smb3_transfer_done(data, req, done);
+      req->state = SMB3_TRANSFER;
+      return smb3_read_next(data, sc, req);
+
+    case SMB3_TRANSFER:
+      if(req->upload) {
+        if(req->op_inflight) {
+          if(!req->op_done)
+            return CURLE_OK;
+          req->op_inflight = FALSE;
+          if(req->op_status < 0) {
+            failf(data, "SMB: write failed: %s", smb2_get_error(sc->smb2));
+            return CURLE_SEND_ERROR;
+          }
+          req->offset += req->op_status;
+          Curl_pgrs_upload_inc(data, (size_t)req->op_status);
+          if(req->eos)
+            return smb3_transfer_done(data, req, done);
+        }
+        result = smb3_write_next(data, sc, req, &stop);
+        if(result)
+          return result;
+        if(stop)
+          return smb3_transfer_done(data, req, done);
+        return CURLE_OK;
+      }
+      else {
+        curl_off_t n;
+        if(!req->op_done)
+          return CURLE_OK;
+        req->op_inflight = FALSE;
+        if(req->op_status < 0) {
+          failf(data, "SMB: read failed: %s", smb2_get_error(sc->smb2));
+          return CURLE_RECV_ERROR;
+        }
+        n = req->op_status;
+        if(n > 0) {
+          result = Curl_client_write(data, CLIENTWRITE_BODY, req->buf,
+                                     (size_t)n);
+          if(result)
+            return result;
+          req->offset += n;
+          if(req->remaining > 0)
+            req->remaining -= n;
+        }
+        if(!n || !req->remaining)
+          return smb3_transfer_done(data, req, done);
+        return smb3_read_next(data, sc, req);
+      }
+
+    case SMB3_STOP:
+      *done = TRUE;
+      return CURLE_OK;
+    }
+  }
 }
 
 static CURLcode smb3_done(struct Curl_easy *data, CURLcode status,
@@ -440,7 +607,7 @@ static CURLcode smb3_done(struct Curl_easy *data, CURLcode status,
   (void)premature;
 
   if(req && sc && req->fh) {
-    sc->fn_close(sc->ctx, req->fh);
+    smb2_close(sc->smb2, req->fh);
     req->fh = NULL;
   }
   return status;
@@ -452,10 +619,10 @@ const struct Curl_protocol Curl_protocol_smb3 = {
   smb3_done,                            /* done */
   ZERO_NULL,                            /* do_more */
   smb3_connect,                         /* connect_it */
-  ZERO_NULL,                            /* connecting */
-  ZERO_NULL,                            /* doing */
-  ZERO_NULL,                            /* proto_pollset */
-  ZERO_NULL,                            /* doing_pollset */
+  smb3_connecting,                      /* connecting */
+  smb3_doing,                           /* doing */
+  smb3_pollset,                         /* proto_pollset */
+  smb3_pollset,                         /* doing_pollset */
   ZERO_NULL,                            /* domore_pollset */
   ZERO_NULL,                            /* perform_pollset */
   ZERO_NULL,                            /* disconnect */
@@ -466,4 +633,4 @@ const struct Curl_protocol Curl_protocol_smb3 = {
   ZERO_NULL,                            /* follow */
 };
 
-#endif /* USE_LIBSMBCLIENT */
+#endif /* USE_LIBSMB2 */

@@ -52,14 +52,11 @@ Large downloads are split into parallel chunks automatically; pass
 
 ## SMB
 
-SMB2 and SMB3 — up to SMB 3.1.1, with message signing and AES-GCM encryption —
-come from Samba's [libsmbclient](https://www.samba.org/), enabled with
-`--with-libsmbclient` (autotools) or `-DCURL_USE_LIBSMBCLIENT=ON` (CMake). The
-dialect range is pinned to SMB2..SMB 3.1.1, so it never negotiates down to
-SMBv1. Without libsmbclient, curl uses its built-in SMBv1 handler instead.
-
-Note that linking libsmbclient makes the resulting binary GPL-3.0, so it is off
-by default.
+SMB2 and SMB3 — up to SMB 3.1.1, with message signing and encryption —
+come from [libsmb2](https://github.com/sahlberg/libsmb2), enabled with
+`--with-libsmb2` (autotools) or `-DCURL_USE_LIBSMB2=ON` (CMake). libsmb2 is a
+small, portable (Linux, macOS, Windows, FreeBSD) LGPL library that runs its own
+transport. Without it, curl uses its built-in SMBv1 handler instead.
 
 URLs are `smb://server/share/path`:
 

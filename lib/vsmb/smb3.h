@@ -25,15 +25,15 @@
  ***************************************************************************/
 #include "curl_setup.h"
 
-#ifdef USE_LIBSMBCLIENT
+#ifdef USE_LIBSMB2
 
 #include "protocol.h"
 
-/* SMB handler backed by Samba's libsmbclient, providing modern SMB2/3
+/* SMB2/3 handler backed by libsmb2, providing modern SMB dialects
    dialects up to SMB 3.1.1 (signing and AES-GCM encryption). When built,
    this replaces the native SMBv1 handler for the smb:// scheme. */
 extern const struct Curl_protocol Curl_protocol_smb3;
 
-#endif /* USE_LIBSMBCLIENT */
+#endif /* USE_LIBSMB2 */
 
 #endif /* HEADER_CURL_SMB3_H */

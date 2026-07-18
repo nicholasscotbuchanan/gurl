@@ -1,11 +1,11 @@
 #!/bin/sh
 # Manage the local Samba (SMB 3.1.1) container used to test curl's
-# libsmbclient-backed smb:// handler.
+# libsmb2-backed smb:// handler.
 #
 #   ./smb3-server.sh start     build (if needed) and run the server
 #   ./smb3-server.sh stop      remove the container
 #   ./smb3-server.sh status    show container + live session state
-#   ./smb3-server.sh encrypt   require SMB3 encryption (AES-GCM) and reload
+#   ./smb3-server.sh encrypt   require SMB3 encryption (AES-CCM/GCM) and reload
 #   ./smb3-server.sh logs      tail smbd output
 #
 # Server exposes //127.0.0.1/share as smbuser/smbpass on port 445.
@@ -49,7 +49,7 @@ case "${1:-start}" in
   encrypt)
     "$RT" exec "$NAME" sh -c \
       "sed -i 's/^   smb encrypt = .*/   smb encrypt = required/' /etc/samba/smb.conf && smbcontrol smbd reload-config"
-    echo "SMB3 encryption now REQUIRED (AES-GCM)"
+    echo "SMB3 encryption now REQUIRED"
     ;;
   logs)
     "$RT" logs "$NAME"

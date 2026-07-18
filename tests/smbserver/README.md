@@ -1,6 +1,6 @@
 # SMB 3.1.1 test server
 
-A minimal Samba container for testing curl's libsmbclient-backed `smb://`
+A minimal Samba container for testing curl's libsmb2-backed `smb://`
 handler (`lib/vsmb/smb3.c`). Configured to speak **only** SMB2 .. SMB 3.1.1 —
 SMBv1 is disabled, so a successful transfer proves the modern code path.
 
@@ -52,7 +52,7 @@ curl -s -u smbuser:smbpass smb://127.0.0.1/share/blob.bin -o /dev/null &
 
 `./smb3-server.sh encrypt` flips the server to `smb encrypt = required`, which
 only SMB3 clients can satisfy. Re-running `test-smb3.sh` afterwards exercises
-the AES-GCM transform end to end.
+the SMB3 encryption transform end to end.
 
 ## Notes
 
