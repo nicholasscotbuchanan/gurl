@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+#
+# Cross-build the static dependency stack (zlib, OpenSSL, libnfs) for the target
+# described by the environment. This runs at *image build* time so the expensive
+# dependency builds are baked into an image layer and cached; build-curl.sh then
+# links curl against $PREFIX at *run* time.
+#
+# The per-target Dockerfiles set the environment this script reads:
+#   PLATFORM        linux | windows | freebsd | macos   (informational)
+#   TARGET_NAME     e.g. linux-x86_64                    (artifact suffix)
+#   TRIPLE          autotools --host triple, e.g. x86_64-linux-musl
+#   OPENSSL_TARGET  OpenSSL Configure target, e.g. linux-x86_64 / mingw64 / darwin64-x86_64
+#   CC/CXX/AR/RANLIB/STRIP   toolchain commands (CC may carry --target/--sysroot for clang)
+#   CROSS_PREFIX    tool prefix (e.g. x86_64-w64-mingw32-), used by zlib's win32 makefile
+#   ZLIB_MODE       configure | win32gcc | skip
+#   PREFIX          install prefix for the dep stack (default /opt/prefix)
+#   ZLIB_VERSION / OPENSSL_VERSION / LIBNFS_REF   source versions
+#
+# SPDX-License-Identifier: curl
+set -euo pipefail
+
+: "${PLATFORM:?PLATFORM not set}"
+: "${TRIPLE:?TRIPLE not set}"
+: "${OPENSSL_TARGET:?OPENSSL_TARGET not set}"
+: "${CC:?CC not set}"
+
+PREFIX="${PREFIX:-/opt/prefix}"
+JOBS="${JOBS:-$(nproc)}"
+ZLIB_MODE="${ZLIB_MODE:-configure}"
+CROSS_PREFIX="${CROSS_PREFIX:-}"
+export CC
+export CXX="${CXX:-}"
+export AR="${AR:-ar}"
+export RANLIB="${RANLIB:-ranlib}"
+
+mkdir -p "$PREFIX" /build
+cd /build
+
+fetch() { # url [url2 ...] -> downloads to basename of first url
+  local out; out="$(basename "$1")"
+  local url
+  for url in "$@"; do
+    echo "--- fetching $url"
+    if curl -fsSL "$url" -o "$out"; then return 0; fi
+  done
+  echo "!!! could not download $out from any mirror" >&2
+  return 1
+}
+
+########################################################################
+# zlib
+########################################################################
+build_zlib() {
+  if [ "$ZLIB_MODE" = "skip" ]; then
+    echo "=== zlib: skipped (using target SDK's zlib) ==="
+    return 0
+  fi
+  echo "=== zlib ${ZLIB_VERSION} (${ZLIB_MODE}) ==="
+  fetch "https://zlib.net/fossils/zlib-${ZLIB_VERSION}.tar.gz" \
+        "https://www.zlib.net/zlib-${ZLIB_VERSION}.tar.gz"
+  tar xf "zlib-${ZLIB_VERSION}.tar.gz"
+  cd "zlib-${ZLIB_VERSION}"
+  if [ "$ZLIB_MODE" = "win32gcc" ]; then
+    # zlib's unix ./configure does not produce a usable Windows static lib;
+    # its win32 makefile does. PREFIX here is the *tool* prefix.
+    make -f win32/Makefile.gcc -j"$JOBS" libz.a PREFIX="$CROSS_PREFIX"
+    install -d "$PREFIX/include" "$PREFIX/lib"
+    install -m644 zlib.h zconf.h "$PREFIX/include/"
+    install -m644 libz.a "$PREFIX/lib/"
+  else
+    # honours CC/AR/RANLIB from the environment; static archive only.
+    CHOST="$TRIPLE" ./configure --static --prefix="$PREFIX"
+    make -j"$JOBS"
+    make install
+  fi
+  cd /build
+}
+
+########################################################################
+# OpenSSL (static libssl/libcrypto, no shared, no tests)
+########################################################################
+build_openssl() {
+  echo "=== openssl ${OPENSSL_VERSION} (${OPENSSL_TARGET}) ==="
+  fetch "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
+        "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
+  tar xf "openssl-${OPENSSL_VERSION}.tar.gz"
+  cd "openssl-${OPENSSL_VERSION}"
+  if [ -n "${OPENSSL_CROSS_PREFIX:-}" ]; then
+    # Some targets (mingw) need OpenSSL to derive *all* tools from a single
+    # prefix — notably windres for the provider .rc files, which the env-CC
+    # path leaves as a bare `windres` that can't find the mingw headers.
+    # Unset the tool env vars so --cross-compile-prefix fully governs them.
+    ( unset CC CXX AR RANLIB
+      ./Configure "$OPENSSL_TARGET" \
+        no-shared no-tests \
+        --cross-compile-prefix="$OPENSSL_CROSS_PREFIX" \
+        --prefix="$PREFIX" --openssldir="$PREFIX/ssl" ${OPENSSL_EXTRA:-} )
+  else
+    # OpenSSL honours $CC/$AR/$RANLIB from the environment for cross builds.
+    ./Configure "$OPENSSL_TARGET" \
+      no-shared no-tests \
+      --prefix="$PREFIX" --openssldir="$PREFIX/ssl" ${OPENSSL_EXTRA:-}
+  fi
+  make -j"$JOBS"
+  make install_sw
+  cd /build
+}
+
+########################################################################
+# libnfs (static, NFSv3) — this is what enables curl's nfs:// support
+########################################################################
+build_libnfs() {
+  echo "=== libnfs ${LIBNFS_REF} ==="
+  git clone --depth 1 --branch "${LIBNFS_REF}" https://github.com/sahlberg/libnfs.git
+  cd libnfs
+  ./bootstrap
+  # --without-libkrb5: libnfs 6.x enables gssapi_krb5 by default and hard-fails
+  #   without gssapi dev files; curl's NFSv3 path does not need Kerberos.
+  # examples/utils are host tools we do not need and that can fail to cross-link.
+  # --disable-werror: libnfs' win32 compat shim trips -Werror under mingw.
+  ./configure --host="$TRIPLE" --prefix="$PREFIX" \
+    --disable-shared --enable-static \
+    --without-libkrb5 --disable-werror \
+    --disable-examples --disable-utils
+  make -j"$JOBS"
+  make install
+  cd /build
+}
+
+build_zlib
+build_openssl
+build_libnfs
+
+echo "=== dependency stack installed under $PREFIX ==="
+ls -la "$PREFIX/lib" || true
