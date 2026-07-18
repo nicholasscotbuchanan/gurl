@@ -14,7 +14,7 @@
 #   CROSS_PREFIX    tool prefix (e.g. x86_64-w64-mingw32-), used by zlib's win32 makefile
 #   ZLIB_MODE       configure | win32gcc | skip
 #   PREFIX          install prefix for the dep stack (default /opt/prefix)
-#   ZLIB_VERSION / OPENSSL_VERSION / LIBNFS_REF   source versions
+#   ZLIB_VERSION / OPENSSL_VERSION / LIBNFS_REF / LIBSMB2_REF   source versions
 #
 # SPDX-License-Identifier: curl
 set -euo pipefail
@@ -127,9 +127,40 @@ build_libnfs() {
   cd /build
 }
 
+########################################################################
+# libsmb2 (static, SMB2/SMB3) — this is what enables curl's smb:// support
+########################################################################
+build_libsmb2() {
+  echo "=== libsmb2 ${LIBSMB2_REF} ==="
+  # LIBSMB2_REF may be a tag or a raw commit SHA, so fetch it explicitly
+  # rather than using --branch (which only accepts refs).
+  mkdir libsmb2
+  cd libsmb2
+  git init -q
+  git remote add origin https://github.com/sahlberg/libsmb2.git
+  git fetch -q --depth 1 origin "${LIBSMB2_REF}"
+  git checkout -q FETCH_HEAD
+  ./bootstrap
+  # --without-libkrb5: use libsmb2's built-in NTLMSSP; curl's SMB path does
+  #   not need Kerberos and krb5 dev files are not in the cross sysroots.
+  # --disable-werror: libsmb2's win32 compat shim trips -Werror under mingw.
+  ./configure --host="$TRIPLE" --prefix="$PREFIX" \
+    --disable-shared --enable-static \
+    --without-libkrb5 --disable-werror
+  # Build only the library and headers: the utils/ subdir builds -Werror host
+  # programs (smb2-cp, smb2-ls) that are not needed and can fail to cross-link.
+  make -C include install
+  make -C lib -j"$JOBS"
+  make -C lib install
+  install -d "$PREFIX/lib/pkgconfig"
+  install -m644 libsmb2.pc "$PREFIX/lib/pkgconfig/"
+  cd /build
+}
+
 build_zlib
 build_openssl
 build_libnfs
+build_libsmb2
 
 echo "=== dependency stack installed under $PREFIX ==="
 ls -la "$PREFIX/lib" || true

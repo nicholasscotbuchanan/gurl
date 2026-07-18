@@ -1,8 +1,9 @@
 # Cross-compiling curl in containers
 
 Reproducible, containerized cross-compilation of this branch's curl — including
-`nfs://` support (static **libnfs**) and `--parallel-chunks` — as **static**
-binaries linked against **OpenSSL**, for:
+`nfs://` support (static **libnfs**), `smb://` SMB2/SMB3 support (static
+**libsmb2**) and `--parallel-chunks` — as **static** binaries linked against
+**OpenSSL**, for:
 
 | Target         | Toolchain (in container)                 | Output                     |
 | -------------- | ---------------------------------------- | -------------------------- |
@@ -15,8 +16,9 @@ binaries linked against **OpenSSL**, for:
 
 Each container builds the dependency stack once at image-build time (cached in a
 layer), then links curl at run time. Every target statically links zlib*,
-OpenSSL and libnfs. Linux/Windows/FreeBSD binaries are fully static; macOS links
-those deps statically but `libSystem` dynamically (Apple ships no static libc).
+OpenSSL, libnfs and libsmb2. Linux/Windows/FreeBSD binaries are fully static;
+macOS links those deps statically but `libSystem` dynamically (Apple ships no
+static libc).
 
 \* macOS uses the SDK's zlib instead of building its own.
 
@@ -91,6 +93,7 @@ Dependency versions are `ARG`s — override per target with `--build-arg`:
 - `OPENSSL_VERSION` (default `3.5.1`)
 - `ZLIB_VERSION` (default `1.3.1`)
 - `LIBNFS_REF` (default `libnfs-6.0.2`; may be any tag or branch, e.g. `master`)
+- `LIBSMB2_REF` (default is a pinned commit SHA; may be any tag or commit)
 - FreeBSD: `FREEBSD_VERSION` (`14.3`; the mirror keeps only the current point
   release, so bump this if `base.txz` 404s), `FREEBSD_ABI` (`14`)
 - macOS: `DARWIN_VER`, `OSXCROSS_REF`
@@ -103,16 +106,17 @@ If a default version 404s (releases move), bump the `ARG` — the URLs in
 ```text
 build-all.sh          orchestrates: build image -> run image -> collect artifact
 <target>/Dockerfile   installs the toolchain, sets the per-target env, runs build-deps.sh
-build-deps.sh         (image build) static zlib + OpenSSL + libnfs -> /opt/prefix
+build-deps.sh         (image build) static zlib + OpenSSL + libnfs + libsmb2 -> /opt/prefix
 build-curl.sh         (entrypoint)  autoreconf + out-of-tree ./configure --host + make
 ```
 
 curl is configured with `--host=<triple> --disable-shared --enable-static
---with-openssl=/opt/prefix --with-libnfs=/opt/prefix`. Because
-[`lib/curl_setup.h`](../../lib/curl_setup.h) maps `USE_LIBNFS` → `USE_NFS`,
-linking libnfs is what enables the `nfs://` scheme; `--version` on the target
-should list **nfs** among the protocols. `--parallel-chunks` is tool-side and
-always present.
+--with-openssl=/opt/prefix --with-libnfs=/opt/prefix --with-libsmb2=/opt/prefix`.
+Because [`lib/curl_setup.h`](../../lib/curl_setup.h) maps `USE_LIBNFS` → `USE_NFS`,
+linking libnfs is what enables the `nfs://` scheme, and linking libsmb2 enables
+the SMB2/SMB3 `smb://` scheme; `--version` on the target should list both **nfs**
+and **smb** among the protocols. `--parallel-chunks` is tool-side and always
+present.
 
 The source tree is bind-mounted **read-only** and copied into the container
 before building, so your working tree is never modified and host build artifacts

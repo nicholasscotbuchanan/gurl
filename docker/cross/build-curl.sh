@@ -69,8 +69,10 @@ echo "=== configure (host=$TRIPLE) ==="
   --disable-shared --enable-static \
   --with-openssl="$PREFIX" \
   --with-libnfs="$PREFIX" \
+  --with-libsmb2="$PREFIX" \
   "${zlib_arg[@]}" \
   --without-libpsl \
+  --without-brotli --without-zstd \
   --disable-ldap --disable-ldaps \
   LIBS="$EXTRA_LIBS"
 
