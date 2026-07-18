@@ -144,6 +144,13 @@ build_libsmb2() {
   # breaks the mingw (Windows) cross build where there is no libdl. Make the
   # check optional; curl's SMB path does not use libsmb2's dlopen feature.
   sed -i 's/AC_MSG_ERROR(\[dlsym not found, libdl is required\])//' configure.ac
+  # libsmb2.h detects Windows only via _WINDOWS/_XBOX, but mingw-w64 (which its
+  # own lib/compat.h keys off __MINGW32__) does not define _WINDOWS. That makes
+  # the public header typedef t_socket as `int` on mingw while compat.h uses
+  # `SOCKET`, which both breaks libsmb2's own build and would give curl an
+  # int/SOCKET ABI mismatch. Teach the header to recognise mingw too.
+  sed -i 's/#if defined(_WINDOWS)$/#if defined(_WINDOWS) || defined(__MINGW32__)/' include/smb2/libsmb2.h
+  sed -i 's/#if defined(_WINDOWS) || defined(_XBOX)/#if defined(_WINDOWS) || defined(__MINGW32__) || defined(_XBOX)/' include/smb2/libsmb2.h
   # invoke via sh: bootstrap may not have its exec bit after a raw fetch/checkout
   sh ./bootstrap
   # --without-libkrb5: use libsmb2's built-in NTLMSSP; curl's SMB path does
