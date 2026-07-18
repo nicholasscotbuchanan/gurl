@@ -11,6 +11,7 @@ binaries linked against **OpenSSL**, for:
 | Windows x86_64 | mingw-w64                                | `curl-windows-x86_64.exe`  |
 | FreeBSD x86_64 | clang + lld + FreeBSD base sysroot       | `curl-freebsd-x86_64`      |
 | macOS x86_64   | osxcross (needs an Apple SDK you supply) | `curl-macos-x86_64`        |
+| macOS arm64    | osxcross (needs an Apple SDK you supply) | `curl-macos-arm64`         |
 
 Each container builds the dependency stack once at image-build time (cached in a
 layer), then links curl at run time. Every target statically links zlib*,
@@ -128,7 +129,8 @@ static, NFS-enabled curl (`nfs` in the protocol list, libnfs linked):
 | linux-aarch64 | `static-pie` ELF ARM64                             | ran in-container: `nfs: ENABLED` |
 | windows       | `PE32+` static `.exe`                              | configure summary + `nfs` symbols |
 | freebsd       | static ELF, FreeBSD 14.3                           | configure summary + `libnfs` symbols |
-| macos         | `Mach-O` x86_64 (PIE)                              | configure summary + `nfs://`/`libnfs` symbols |
+| macos-x86_64  | `Mach-O` x86_64 (PIE)                              | configure summary + `nfs://`/`libnfs` symbols |
+| macos-arm64   | `Mach-O` arm64 (PIE)                               | configure summary + `nfs://`/`libnfs` symbols |
 
 Non-Linux binaries can't run on the Linux build host, so their NFS support is
 confirmed from curl's configure summary (`Protocols: … nfs …`) plus libnfs

@@ -51,15 +51,19 @@ target_linux_x86_64() { build_image curl-cross-linux-x86_64 linux/Dockerfile --b
 target_linux_aarch64() { build_image curl-cross-linux-aarch64 linux/Dockerfile --build-arg ARCH=aarch64; run_image curl-cross-linux-aarch64; }
 target_windows() { build_image curl-cross-windows windows/Dockerfile; run_image curl-cross-windows; }
 target_freebsd() { build_image curl-cross-freebsd freebsd/Dockerfile; run_image curl-cross-freebsd; }
-target_macos() {
+_macos() {  # $1 = x86_64 | arm64
   # On a Mac this packages the locally-installed SDK and prints the matching
   # DARWIN_VER; on a non-Mac it reuses a tarball you dropped in macos/sdk/ (or
-  # exits with instructions if none is present).
-  local dv
+  # exits with instructions if none is present). osxcross builds both arch
+  # wrapper sets from one SDK, so the two arches share the cached toolchain image.
+  local arch="$1" dv
   dv="$("$CROSS_DIR/macos/prepare-macos-sdk.sh")" || return 1
-  build_image curl-cross-macos macos/Dockerfile --build-arg "DARWIN_VER=$dv"
-  run_image curl-cross-macos
+  build_image "curl-cross-macos-$arch" macos/Dockerfile \
+    --build-arg "DARWIN_VER=$dv" --build-arg "MACOS_ARCH=$arch"
+  run_image "curl-cross-macos-$arch"
 }
+target_macos_x86_64() { _macos x86_64; }
+target_macos_arm64()  { _macos arm64; }
 
 # Expand requested targets into a deduped, order-preserving list of functions.
 # Kept array-free so it also runs under macOS's stock bash 3.2 with `set -u`.
@@ -69,13 +73,15 @@ TODO=""
 add_target() { case " $TODO " in *" $1 "*) ;; *) TODO="$TODO $1" ;; esac; }
 for t in "$@"; do
   case "$t" in
-    all)           add_target linux_x86_64; add_target linux_aarch64; add_target windows; add_target freebsd; add_target macos ;;
+    all)           add_target linux_x86_64; add_target linux_aarch64; add_target windows; add_target freebsd; add_target macos_x86_64; add_target macos_arm64 ;;
     linux)         add_target linux_x86_64; add_target linux_aarch64 ;;
     linux-x86_64)  add_target linux_x86_64 ;;
     linux-aarch64) add_target linux_aarch64 ;;
     windows)       add_target windows ;;
     freebsd)       add_target freebsd ;;
-    macos)         add_target macos ;;
+    macos)         add_target macos_x86_64; add_target macos_arm64 ;;
+    macos-x86_64)  add_target macos_x86_64 ;;
+    macos-arm64)   add_target macos_arm64 ;;
     *) echo "error: unknown target '$t'" >&2; exit 1 ;;
   esac
 done

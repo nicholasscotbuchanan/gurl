@@ -1,4 +1,5 @@
-# Cross-compile curl for macOS x86_64 using osxcross.
+# Cross-compile curl for macOS (x86_64 or arm64, via --build-arg MACOS_ARCH)
+# using osxcross.
 #
 # SDK: on a Mac, build-all.sh runs macos/prepare-macos-sdk.sh to package your
 # locally-installed SDK into macos/sdk/ and pass the matching DARWIN_VER
@@ -39,17 +40,22 @@ RUN cd /opt/osxcross \
  && UNATTENDED=1 ./build.sh
 ENV PATH="/opt/osxcross/target/bin:${PATH}"
 
+# Target macOS arch: x86_64 or arm64. osxcross builds both wrapper sets from the
+# one SDK, and this ARG is only used below (after the osxcross layer), so the two
+# arches share the cached toolchain image. OpenSSL's target is darwin64-<arch>.
+ARG MACOS_ARCH=x86_64
+
 ENV PLATFORM=macos \
-    TARGET_NAME=macos-x86_64 \
-    TRIPLE=x86_64-apple-darwin${DARWIN_VER} \
-    OPENSSL_TARGET=darwin64-x86_64 \
+    TARGET_NAME=macos-${MACOS_ARCH} \
+    TRIPLE=${MACOS_ARCH}-apple-darwin${DARWIN_VER} \
+    OPENSSL_TARGET=darwin64-${MACOS_ARCH} \
     PREFIX=/opt/prefix \
-    CC=x86_64-apple-darwin${DARWIN_VER}-clang \
-    CXX=x86_64-apple-darwin${DARWIN_VER}-clang++ \
-    AR=x86_64-apple-darwin${DARWIN_VER}-ar \
-    RANLIB=x86_64-apple-darwin${DARWIN_VER}-ranlib \
-    STRIP=x86_64-apple-darwin${DARWIN_VER}-strip \
-    CROSS_PREFIX=x86_64-apple-darwin${DARWIN_VER}- \
+    CC=${MACOS_ARCH}-apple-darwin${DARWIN_VER}-clang \
+    CXX=${MACOS_ARCH}-apple-darwin${DARWIN_VER}-clang++ \
+    AR=${MACOS_ARCH}-apple-darwin${DARWIN_VER}-ar \
+    RANLIB=${MACOS_ARCH}-apple-darwin${DARWIN_VER}-ranlib \
+    STRIP=${MACOS_ARCH}-apple-darwin${DARWIN_VER}-strip \
+    CROSS_PREFIX=${MACOS_ARCH}-apple-darwin${DARWIN_VER}- \
     EXE= \
     ZLIB_MODE=skip \
     ZLIB_VERSION=${ZLIB_VERSION} \
