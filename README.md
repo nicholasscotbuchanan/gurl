@@ -9,11 +9,34 @@ SPDX-License-Identifier: curl
 gurl is the multi-threded curl. curl is a command-line tool for transferring data 
 from or to a server using URLs. It supports these protocols: DICT, FILE, FTP, 
 FTPS, GOPHER, GOPHERS, HTTP, HTTPS, IMAP, IMAPS, LDAP, LDAPS, MQTT, MQTTS, POP3, 
-POP3S, RTSP, SCP, SFTP, SMBv1, SMBS, SMTP, SMTPS, TELNET, TFTP, WS and WSS.
+POP3S, RTSP, SCP, SFTP, SMB, SMTP, SMTPS, TELNET, TFTP, WS and WSS.
 
 But Gurl ALSO supports
-- NFSv3, and SMB 3.11 is on the way! 
+- NFSv3
+- SMB 2 and SMB 3, all the way up to SMB 3.1.1 — with signing and encryption. It's here!
 - Multithreaded downloads
+
+### NFS
+
+NFSv3 lives at `nfs://server/export/path` (backed by libnfs, `--with-libnfs`):
+
+    curl nfs://storage/exports/data/report.csv -o report.csv
+    curl -T ./report.csv nfs://storage/exports/data/report.csv    # upload
+    curl -C - nfs://storage/exports/data/big.iso -o big.iso        # resume
+
+### SMB
+
+The `smb://` scheme now speaks SMB2 and SMB3 (up to SMB 3.1.1, with signing and
+encryption) via [libsmb2](https://github.com/sahlberg/libsmb2), `--with-libsmb2`.
+It never drops back to SMBv1.
+
+    # authenticate with -u (domain accounts as DOMAIN/user)
+    curl -u 'user:password' smb://fileserver/share/docs/report.pdf -O
+    curl -u 'user:password' -T ./report.pdf smb://fileserver/share/docs/report.pdf
+    curl -u 'user:password' -C - smb://fileserver/share/big.iso -o big.iso   # resume
+    curl -u 'user:password' smb://fileserver:4450/share/report.pdf -O        # custom port
+
+A ready-to-run Samba test server lives in [`tests/smbserver/`](tests/smbserver/).
 
 Learn how to use curl by reading [the
 man page](https://curl.se/docs/manpage.html) or [everything
@@ -25,59 +48,6 @@ document](https://curl.se/docs/install.html).
 libcurl is the library curl is using to do its job. It is readily available to
 be used by your software. Read [the libcurl
 man page](https://curl.se/libcurl/c/libcurl.html) to learn how.
-
-## NFS
-
-NFSv3 support comes from [libnfs](https://github.com/sahlberg/libnfs), enabled
-with `--with-libnfs` (autotools) or `-DCURL_USE_LIBNFS=ON` (CMake). libnfs runs
-its own RPC transport, so no NFS mount is needed on the client.
-
-URLs are `nfs://server/export/path`:
-
-    # download a file from an export
-    curl nfs://storage.example.com/exports/data/report.csv -o report.csv
-
-    # upload
-    curl -T ./report.csv nfs://storage.example.com/exports/data/report.csv
-
-    # resume an interrupted download, or fetch a byte range
-    curl -C - nfs://storage.example.com/exports/data/big.iso -o big.iso
-    curl -r 0-1048575 nfs://storage.example.com/exports/data/big.iso -o head.bin
-
-    # non-default RPC ports, read from the URL by libnfs
-    curl "nfs://storage.example.com/exports/data/big.iso?nfsport=2049&mountport=635" -o big.iso
-
-Large downloads are split into parallel chunks automatically; pass
-`--legacy-io` to force a single connection.
-
-## SMB
-
-SMB2 and SMB3 — up to SMB 3.1.1, with message signing and encryption —
-come from [libsmb2](https://github.com/sahlberg/libsmb2), enabled with
-`--with-libsmb2` (autotools) or `-DCURL_USE_LIBSMB2=ON` (CMake). libsmb2 is a
-small, portable (Linux, macOS, Windows, FreeBSD) LGPL library that runs its own
-transport. Without it, curl uses its built-in SMBv1 handler instead.
-
-URLs are `smb://server/share/path`:
-
-    # download, authenticating as a local account on the server
-    curl -u 'user:password' smb://fileserver/share/docs/report.pdf -o report.pdf
-
-    # domain accounts are given as DOMAIN/user (DOMAIN\user also works)
-    curl -u 'CORP/alice:password' smb://fileserver/share/docs/report.pdf -O
-
-    # upload
-    curl -u 'user:password' -T ./report.pdf smb://fileserver/share/docs/report.pdf
-
-    # resume, or fetch a byte range
-    curl -u 'user:password' -C - smb://fileserver/share/big.iso -o big.iso
-    curl -u 'user:password' -r 0-1048575 smb://fileserver/share/big.iso -o head.bin
-
-    # a non-default port
-    curl -u 'user:password' smb://fileserver:4450/share/docs/report.pdf -O
-
-`tests/smbserver/` builds a container running a real Samba server restricted to
-SMB2..SMB 3.1.1 to test against.
 
 ## Open Source
 
