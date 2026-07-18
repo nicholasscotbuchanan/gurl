@@ -73,7 +73,6 @@ EXTRA_DIST =         \
   secureserver.pl    \
   serverhelp.pm      \
   servers.pm         \
-  smbserver.py       \
   sshhelp.pm         \
   sshserver.pl       \
   testcurl.pl        \
