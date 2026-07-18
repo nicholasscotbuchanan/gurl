@@ -2611,6 +2611,97 @@ elif test "x$OPT_LIBSSH" != "xno"; then
 fi
 
 dnl **********************************************************************
+dnl Check for the presence of libnfs libraries and headers (NFSv3)
+dnl **********************************************************************
+
+dnl Default to compiler & linker defaults for libnfs files & libraries.
+OPT_LIBNFS=off
+AC_ARG_WITH(libnfs,
+AS_HELP_STRING([--with-libnfs=PATH],[Where to look for libnfs, PATH points to the libnfs installation;
+  when possible, set the PKG_CONFIG_PATH environment variable instead of using this option])
+AS_HELP_STRING([--with-libnfs], [enable libnfs for NFS support]),
+  OPT_LIBNFS=$withval, OPT_LIBNFS=no)
+
+curl_nfs_msg="no      (--with-libnfs)"
+if test "x$OPT_LIBNFS" != "xno"; then
+  dnl backup the pre-libnfs variables
+  CLEANLDFLAGS="$LDFLAGS"
+  CLEANLDFLAGSPC="$LDFLAGSPC"
+  CLEANCPPFLAGS="$CPPFLAGS"
+  CLEANLIBS="$LIBS"
+
+  case "$OPT_LIBNFS" in
+    yes)
+      dnl --with-libnfs (without path) used
+      CURL_CHECK_PKGCONFIG(libnfs)
+
+      if test "$PKGCONFIG" != "no"; then
+        LIB_NFS=`$PKGCONFIG --libs-only-l libnfs`
+        LD_NFS=`$PKGCONFIG --libs-only-L libnfs`
+        CPP_NFS=`$PKGCONFIG --cflags-only-I libnfs`
+        version=`$PKGCONFIG --modversion libnfs`
+        DIR_NFS=`echo $LD_NFS | $SED -e 's/^-L//'`
+      fi
+
+      ;;
+    off)
+      dnl no --with-libnfs option given, check default places
+      ;;
+    *)
+      dnl use the given --with-libnfs spot
+      PREFIX_NFS=$OPT_LIBNFS
+      ;;
+  esac
+
+  dnl if given with a prefix, we set -L and -I based on that
+  if test -n "$PREFIX_NFS"; then
+    LIB_NFS="-lnfs"
+    LD_NFS=-L${PREFIX_NFS}/lib$libsuff
+    CPP_NFS=-I${PREFIX_NFS}/include
+    DIR_NFS=${PREFIX_NFS}/lib$libsuff
+  fi
+
+  LDFLAGS="$LDFLAGS $LD_NFS"
+  LDFLAGSPC="$LDFLAGSPC $LD_NFS"
+  CPPFLAGS="$CPPFLAGS $CPP_NFS"
+  LIBS="$LIB_NFS $LIBS"
+
+  AC_CHECK_LIB(nfs, nfs_init_context)
+
+  AC_CHECK_HEADER(nfsc/libnfs.h,
+    curl_nfs_msg="enabled (libnfs)"
+    AC_DEFINE(USE_LIBNFS, 1, [if libnfs is in use])
+    USE_LIBNFS=1
+  )
+
+  if test "x$OPT_LIBNFS" != "xoff" &&
+     test "$USE_LIBNFS" != "1"; then
+    AC_MSG_ERROR([libnfs libs and/or directories were not found!])
+  fi
+
+  if test "$USE_LIBNFS" = "1"; then
+    if test -n "$DIR_NFS"; then
+      dnl when the libnfs shared libs were found in a path that the runtime
+      dnl linker does not search through, we need to add it to
+      dnl CURL_LIBRARY_PATH to prevent further configure tests from failing
+
+      if test "$cross_compiling" != "yes"; then
+        CURL_LIBRARY_PATH="$CURL_LIBRARY_PATH:$DIR_NFS"
+        export CURL_LIBRARY_PATH
+        AC_MSG_NOTICE([Added $DIR_NFS to CURL_LIBRARY_PATH])
+      fi
+    fi
+    LIBCURL_PC_REQUIRES_PRIVATE="$LIBCURL_PC_REQUIRES_PRIVATE libnfs"
+  else
+    dnl no libnfs, revert back to clean variables
+    LDFLAGS=$CLEANLDFLAGS
+    LDFLAGSPC=$CLEANLDFLAGSPC
+    CPPFLAGS=$CLEANCPPFLAGS
+    LIBS=$CLEANLIBS
+  fi
+fi
+
+dnl **********************************************************************
 dnl Check for LDAP (after the SSL libraries)
 dnl **********************************************************************
 
@@ -5433,6 +5524,9 @@ if test "$USE_LIBSSH" = "1"; then
   SUPPORT_PROTOCOLS="$SUPPORT_PROTOCOLS SCP"
   SUPPORT_PROTOCOLS="$SUPPORT_PROTOCOLS SFTP"
 fi
+if test "$USE_LIBNFS" = "1"; then
+  SUPPORT_PROTOCOLS="$SUPPORT_PROTOCOLS NFS"
+fi
 if test "$CURL_DISABLE_IPFS" != "1"; then
   SUPPORT_PROTOCOLS="$SUPPORT_PROTOCOLS IPFS IPNS"
 fi
@@ -5523,6 +5617,7 @@ AC_MSG_NOTICE([Configured to build curl/libcurl:
   curl version:     ${CURLVERSION}
   SSL:              ${curl_ssl_msg}
   SSH:              ${curl_ssh_msg}
+  NFS:              ${curl_nfs_msg}
   zlib:             ${curl_zlib_msg}
   brotli:           ${curl_brotli_msg}
   zstd:             ${curl_zstd_msg}

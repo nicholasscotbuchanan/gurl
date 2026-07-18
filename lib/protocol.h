@@ -54,6 +54,7 @@ struct easy_pollset;
 #define PORT_SOCKS  1080
 #define PORT_MQTT   1883
 #define PORT_MQTTS  8883
+#define PORT_NFS    2049
 
 /* CURLPROTO_GOPHERS (29) is the highest publicly used protocol bit number,
  * the rest are internal information. If we use higher bits we only do this on
@@ -64,6 +65,7 @@ struct easy_pollset;
 #define CURLPROTO_WSS    ((curl_prot_t)1 << 31)
 #define CURLPROTO_MQTTS  (1LL << 32)
 #define CURLPROTO_SOCKS  (1LL << 33)
+#define CURLPROTO_NFS    (1LL << 34)
 
 #define CURLPROTO_64ALL ((uint64_t)0xffffffffffffffff)
 
@@ -88,6 +90,7 @@ typedef curl_off_t curl_prot_t;
 #define PROTO_FAMILY_SMB  (CURLPROTO_SMB | CURLPROTO_SMBS)
 #define PROTO_FAMILY_SMTP (CURLPROTO_SMTP | CURLPROTO_SMTPS)
 #define PROTO_FAMILY_SSH  (CURLPROTO_SCP | CURLPROTO_SFTP)
+#define PROTO_FAMILY_NFS  (CURLPROTO_NFS)
 
 #if !defined(CURL_DISABLE_FTP) || defined(USE_SSH) || \
   !defined(CURL_DISABLE_POP3)
@@ -274,6 +277,7 @@ extern const struct Curl_scheme Curl_scheme_ldap;
 extern const struct Curl_scheme Curl_scheme_ldaps;
 extern const struct Curl_scheme Curl_scheme_mqtt;
 extern const struct Curl_scheme Curl_scheme_mqtts;
+extern const struct Curl_scheme Curl_scheme_nfs;
 extern const struct Curl_scheme Curl_scheme_pop3;
 extern const struct Curl_scheme Curl_scheme_pop3s;
 extern const struct Curl_scheme Curl_scheme_rtsp;

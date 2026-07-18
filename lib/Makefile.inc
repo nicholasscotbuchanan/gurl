@@ -151,6 +151,12 @@ LIB_VSSH_HFILES =    \
   vssh/vssh.h        \
   vssh/ssh.h
 
+LIB_VNFS_CFILES =    \
+  vnfs/nfs.c
+
+LIB_VNFS_HFILES =    \
+  vnfs/nfs.h
+
 LIB_CFILES =         \
   altsvc.c           \
   amigaos.c          \
@@ -425,6 +431,6 @@ LIB_HFILES =         \
 LIB_RCFILES = libcurl.rc
 
 CSOURCES = $(LIB_CFILES) $(LIB_VAUTH_CFILES) $(LIB_VTLS_CFILES) \
-  $(LIB_VQUIC_CFILES) $(LIB_VSSH_CFILES) $(LIB_CURLX_CFILES)
+  $(LIB_VQUIC_CFILES) $(LIB_VSSH_CFILES) $(LIB_VNFS_CFILES) $(LIB_CURLX_CFILES)
 HHEADERS = $(LIB_HFILES) $(LIB_VAUTH_HFILES) $(LIB_VTLS_HFILES) \
-  $(LIB_VQUIC_HFILES) $(LIB_VSSH_HFILES) $(LIB_CURLX_HFILES)
+  $(LIB_VQUIC_HFILES) $(LIB_VSSH_HFILES) $(LIB_VNFS_HFILES) $(LIB_CURLX_HFILES)
