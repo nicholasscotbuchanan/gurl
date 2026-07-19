@@ -104,7 +104,13 @@ make -j"$JOBS" LDFLAGS="-L$PREFIX/lib -L$PREFIX/lib64 $EXTRA_LDFLAGS"
 install -d "$OUT"
 artifact="$OUT/curl-${TARGET_NAME}${EXE}"
 cp "src/curl${EXE}" "$artifact"
-"${STRIP:-strip}" "$artifact" 2>/dev/null || true
+# Do not strip macOS binaries: osxcross's linker already stripped them (via
+# EXTRA_LDFLAGS=-Wl,-S -Wl,-x) and adhoc-signed the result, so a post-link
+# strip here would invalidate that signature and make them unlaunchable on
+# Apple Silicon. Every other target is stripped as usual.
+if [ "${PLATFORM:-}" != "macos" ]; then
+  "${STRIP:-strip}" "$artifact" 2>/dev/null || true
+fi
 
 echo "=== built $artifact ==="
 file "$artifact" 2>/dev/null || true

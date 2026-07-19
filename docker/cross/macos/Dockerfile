@@ -74,7 +74,12 @@ RUN chmod +x /usr/local/bin/build-deps.sh && /usr/local/bin/build-deps.sh
 # CoreFoundation + SystemConfiguration, so the tool link needs those frameworks.
 # No -static on macOS: Apple ships no static libc, so libSystem stays dynamic
 # (the deps in $PREFIX are still linked statically as only .a exist there).
-ENV EXTRA_LDFLAGS= \
+# Strip at *link* time (-Wl,-S drops debug syms, -Wl,-x drops non-global syms)
+# rather than with a post-link `strip`: osxcross's ld64 adhoc-signs the Mach-O
+# as the final step of the link, so the signature covers the already-stripped
+# output. A separate `strip` afterwards would mutate the file and invalidate
+# that signature, which makes the binary unlaunchable on Apple Silicon.
+ENV EXTRA_LDFLAGS="-Wl,-S -Wl,-x" \
     EXTRA_LIBS="-framework CoreFoundation -framework SystemConfiguration"
 
 COPY build-curl.sh /usr/local/bin/
