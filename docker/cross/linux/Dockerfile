@@ -10,6 +10,7 @@ ARG ARCH=x86_64
 ARG ZLIB_VERSION=1.3.1
 ARG OPENSSL_VERSION=3.5.1
 ARG LIBNFS_REF=libnfs-6.0.2
+ARG LIBSMB2_REF=5264e394d1f3046ac56b2f0bcdc375703320730e
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
@@ -41,7 +42,8 @@ ENV PLATFORM=linux \
     EXTRA_LIBS="-lpthread -ldl" \
     ZLIB_VERSION=${ZLIB_VERSION} \
     OPENSSL_VERSION=${OPENSSL_VERSION} \
-    LIBNFS_REF=${LIBNFS_REF}
+    LIBNFS_REF=${LIBNFS_REF} \
+    LIBSMB2_REF=${LIBSMB2_REF}
 
 # deps first so editing build-curl.sh below does not bust the dependency layer
 COPY build-deps.sh /usr/local/bin/

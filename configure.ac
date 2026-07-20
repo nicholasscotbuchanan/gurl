@@ -2702,6 +2702,109 @@ if test "x$OPT_LIBNFS" != "xno"; then
 fi
 
 dnl **********************************************************************
+dnl Check for the presence of libsmb2 libraries and headers.
+dnl This provides SMB2/SMB3 support (up to SMB 3.1.1) for the smb:// scheme
+dnl and, when enabled, replaces the built-in SMBv1 handler.
+dnl **********************************************************************
+
+dnl Default to compiler & linker defaults for libsmb2 files & libraries.
+OPT_LIBSMB2=off
+AC_ARG_WITH(libsmb2,
+AS_HELP_STRING([--with-libsmb2=PATH],[Where to look for libsmb2, PATH points to the libsmb2 installation;
+  when possible, set the PKG_CONFIG_PATH environment variable instead of using this option])
+AS_HELP_STRING([--with-libsmb2], [enable libsmb2 for SMB2/SMB3 support]),
+  OPT_LIBSMB2=$withval, OPT_LIBSMB2=no)
+
+curl_smb2_msg="no      (--with-libsmb2)"
+if test "x$OPT_LIBSMB2" != "xno"; then
+  dnl backup the pre-libsmb2 variables
+  CLEANLDFLAGS="$LDFLAGS"
+  CLEANLDFLAGSPC="$LDFLAGSPC"
+  CLEANCPPFLAGS="$CPPFLAGS"
+  CLEANLIBS="$LIBS"
+
+  case "$OPT_LIBSMB2" in
+    yes)
+      dnl --with-libsmb2 (without path) used
+      CURL_CHECK_PKGCONFIG(libsmb2)
+
+      if test "$PKGCONFIG" != "no"; then
+        LIB_SMB2=`$PKGCONFIG --libs-only-l libsmb2`
+        LD_SMB2=`$PKGCONFIG --libs-only-L libsmb2`
+        CPP_SMB2=`$PKGCONFIG --cflags-only-I libsmb2`
+        version=`$PKGCONFIG --modversion libsmb2`
+        DIR_SMB2=`echo $LD_SMB2 | $SED -e 's/^-L//'`
+      fi
+
+      ;;
+    off)
+      dnl no --with-libsmb2 option given, check default places
+      ;;
+    *)
+      dnl use the given --with-libsmb2 spot
+      PREFIX_SMB2=$OPT_LIBSMB2
+      ;;
+  esac
+
+  dnl if given with a prefix, we set -L and -I based on that
+  if test -n "$PREFIX_SMB2"; then
+    LIB_SMB2="-lsmb2"
+    LD_SMB2=-L${PREFIX_SMB2}/lib$libsuff
+    CPP_SMB2=-I${PREFIX_SMB2}/include
+    DIR_SMB2=${PREFIX_SMB2}/lib$libsuff
+  fi
+
+  LDFLAGS="$LDFLAGS $LD_SMB2"
+  LDFLAGSPC="$LDFLAGSPC $LD_SMB2"
+  CPPFLAGS="$CPPFLAGS $CPP_SMB2"
+  LIBS="$LIB_SMB2 $LIBS"
+
+  AC_CHECK_LIB(smb2, smb2_init_context)
+
+  dnl Neither <smb2/smb2.h> nor <smb2/libsmb2.h> is self-contained: they need
+  dnl size_t/time_t from the system headers, and libsmb2.h additionally uses
+  dnl types and constants (SMB2_GUID_SIZE, smb2_lease_key) from smb2.h.
+  AC_CHECK_HEADER(smb2/libsmb2.h,
+    curl_smb2_msg="enabled (libsmb2)"
+    AC_DEFINE(USE_LIBSMB2, 1, [if libsmb2 is in use])
+    USE_LIBSMB2=1
+    , , [
+#include <sys/types.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <time.h>
+#include <smb2/smb2.h>
+    ]
+  )
+
+  if test "x$OPT_LIBSMB2" != "xoff" &&
+     test "$USE_LIBSMB2" != "1"; then
+    AC_MSG_ERROR([libsmb2 libs and/or directories were not found!])
+  fi
+
+  if test "$USE_LIBSMB2" = "1"; then
+    if test -n "$DIR_SMB2"; then
+      dnl when the libsmb2 shared libs were found in a path that the runtime
+      dnl linker does not search through, we need to add it to
+      dnl CURL_LIBRARY_PATH to prevent further configure tests from failing
+
+      if test "$cross_compiling" != "yes"; then
+        CURL_LIBRARY_PATH="$CURL_LIBRARY_PATH:$DIR_SMB2"
+        export CURL_LIBRARY_PATH
+        AC_MSG_NOTICE([Added $DIR_SMB2 to CURL_LIBRARY_PATH])
+      fi
+    fi
+    LIBCURL_PC_REQUIRES_PRIVATE="$LIBCURL_PC_REQUIRES_PRIVATE libsmb2"
+  else
+    dnl no libsmb2, revert back to clean variables
+    LDFLAGS=$CLEANLDFLAGS
+    LDFLAGSPC=$CLEANLDFLAGSPC
+    CPPFLAGS=$CLEANCPPFLAGS
+    LIBS=$CLEANLIBS
+  fi
+fi
+
+dnl **********************************************************************
 dnl Check for LDAP (after the SSL libraries)
 dnl **********************************************************************
 
@@ -5504,7 +5607,10 @@ if test "$CURL_DISABLE_IMAP" != "1"; then
     SUPPORT_PROTOCOLS="$SUPPORT_PROTOCOLS IMAPS"
   fi
 fi
-if test "$CURL_ENABLE_SMB" = "1" && test "$use_curl_ntlm_core" = "yes"; then
+if test "$USE_LIBSMB2" = "1"; then
+  dnl libsmb2 provides SMB2/SMB3 (up to 3.1.1) for the smb:// scheme
+  SUPPORT_PROTOCOLS="$SUPPORT_PROTOCOLS SMB"
+elif test "$CURL_ENABLE_SMB" = "1" && test "$use_curl_ntlm_core" = "yes"; then
   SUPPORT_PROTOCOLS="$SUPPORT_PROTOCOLS SMB"
   if test "$SSL_ENABLED" = "1"; then
     SUPPORT_PROTOCOLS="$SUPPORT_PROTOCOLS SMBS"
@@ -5618,6 +5724,7 @@ AC_MSG_NOTICE([Configured to build curl/libcurl:
   SSL:              ${curl_ssl_msg}
   SSH:              ${curl_ssh_msg}
   NFS:              ${curl_nfs_msg}
+  SMB (libsmb2):    ${curl_smb2_msg}
   zlib:             ${curl_zlib_msg}
   brotli:           ${curl_brotli_msg}
   zstd:             ${curl_zstd_msg}

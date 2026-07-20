@@ -43,6 +43,7 @@
 #include "ws.h"
 #include "vssh/ssh.h"
 #include "vnfs/nfs.h"
+#include "vsmb/smb3.h"
 
 
 /* All URI schemes known to libcurl, but not necessarily implemented
@@ -327,14 +328,20 @@ const struct Curl_scheme Curl_scheme_scp = {
 
 const struct Curl_scheme Curl_scheme_smb = {
   "smb",                                /* scheme */
-#if defined(CURL_ENABLE_SMB) && defined(USE_CURL_NTLM_CORE)
+#ifdef USE_LIBSMB2
+  &Curl_protocol_smb3,                  /* SMB2/3 up to 3.1.1 via libsmb2 */
+#elif defined(CURL_ENABLE_SMB) && defined(USE_CURL_NTLM_CORE)
   &Curl_protocol_smb,
 #else
   ZERO_NULL,
 #endif
   CURLPROTO_SMB,                        /* protocol */
   CURLPROTO_SMB,                        /* family */
+#ifdef USE_LIBSMB2
+  PROTOPT_NONETWORK,                    /* libsmb2 owns its transport */
+#else
   PROTOPT_NONE,                         /* flags */
+#endif
   PORT_SMB,                             /* defport */
 };
 

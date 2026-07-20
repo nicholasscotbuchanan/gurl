@@ -63,15 +63,28 @@ if [ "$ZLIB_MODE" = "skip" ]; then
 fi
 
 mkdir -p _build && cd _build
+# On Windows the libsmb2 header check pulls in <windows.h>, whose
+# `#define interface struct` clobbers libsmb2's dcerpc struct field named
+# "interface". curl's own sources define WIN32_LEAN_AND_MEAN before including
+# windows.h, but the bare configure test program does not, so set it here for
+# the whole curl configure. It is a no-op on non-Windows targets.
+curl_cppflags=""
+if [ "${PLATFORM:-}" = "windows" ]; then
+  curl_cppflags="-DWIN32_LEAN_AND_MEAN"
+fi
+
 echo "=== configure (host=$TRIPLE) ==="
 ../configure \
   --host="$TRIPLE" \
   --disable-shared --enable-static \
   --with-openssl="$PREFIX" \
   --with-libnfs="$PREFIX" \
+  --with-libsmb2="$PREFIX" \
   "${zlib_arg[@]}" \
   --without-libpsl \
+  --without-brotli --without-zstd \
   --disable-ldap --disable-ldaps \
+  CPPFLAGS="$curl_cppflags ${CPPFLAGS:-}" \
   LIBS="$EXTRA_LIBS"
 
 echo "=== configure summary ==="
@@ -91,7 +104,13 @@ make -j"$JOBS" LDFLAGS="-L$PREFIX/lib -L$PREFIX/lib64 $EXTRA_LDFLAGS"
 install -d "$OUT"
 artifact="$OUT/curl-${TARGET_NAME}${EXE}"
 cp "src/curl${EXE}" "$artifact"
-"${STRIP:-strip}" "$artifact" 2>/dev/null || true
+# Do not strip macOS binaries: osxcross's linker already stripped them (via
+# EXTRA_LDFLAGS=-Wl,-S -Wl,-x) and adhoc-signed the result, so a post-link
+# strip here would invalidate that signature and make them unlaunchable on
+# Apple Silicon. Every other target is stripped as usual.
+if [ "${PLATFORM:-}" != "macos" ]; then
+  "${STRIP:-strip}" "$artifact" 2>/dev/null || true
+fi
 
 echo "=== built $artifact ==="
 file "$artifact" 2>/dev/null || true

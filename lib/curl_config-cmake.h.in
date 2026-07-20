@@ -691,6 +691,9 @@ ${SIZEOF_TIME_T_CODE}
 /* if libnfs is in use */
 #cmakedefine USE_LIBNFS 1
 
+/* if libsmb2 is in use for SMB2/3 */
+#cmakedefine USE_LIBSMB2 1
+
 /* if libpsl is in use */
 #cmakedefine USE_LIBPSL 1
 
